@@ -211,11 +211,6 @@ Thanks a lot. I look forward to hearing from you.`;
     );
   };
 
-  const goToNextAssessment = () => {
-    // Navigate back to language assessment selection
-    navigate('/language-assessment');
-  };
-
   return (
     <div className="max-w-3xl mx-auto p-6 bg-white rounded-lg shadow-lg">
       <div className="mb-8">
@@ -223,12 +218,6 @@ Thanks a lot. I look forward to hearing from you.`;
           <h2 className="text-2xl font-bold text-[#592538]">
             {results.type.charAt(0).toUpperCase() + results.type.slice(1)} Assessment Results
           </h2>
-          <button 
-            onClick={onBack}
-            className="px-4 py-2 text-sm font-medium text-[#592538] rounded-lg border border-[#592538] hover:bg-[#592538] hover:text-white transition-colors"
-          >
-            Back to Assessments
-          </button>
         </div>
 
         <div className="bg-gray-50 p-6 rounded-lg mb-6">
@@ -427,15 +416,16 @@ Thanks a lot. I look forward to hearing from you.`;
           </div>
         )}
 
+        {/* Only one Back button at the bottom */}
         <div className="flex justify-center mt-8">
           <button
-            onClick={goToNextAssessment}
+            onClick={onBack}
             className="px-6 py-3 bg-[#592538] text-white rounded-lg hover:bg-[#6d2c44] flex items-center"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 1.414L10.586 9H7a1 1 0 100 2h3.586l-1.293 1.293a1 1 0 101.414 1.414l3-3a1 1 0 000-1.414z" clipRule="evenodd" />
+              <path fillRule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" clipRule="evenodd" />
             </svg>
-            Take Another Assessment
+            Back to Assessments
           </button>
         </div>
       </div>

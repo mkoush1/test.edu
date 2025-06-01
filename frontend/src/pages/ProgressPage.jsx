@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../components/DashboardLayout";
 import axios from "axios";
 import { decodeJWT } from "../utils/jwt";
+import api from "../services/api"; // Import the configured API client
 
 const ProgressPage = () => {
   const navigate = useNavigate();
@@ -32,15 +33,8 @@ const ProgressPage = () => {
 
         const userId = decodedToken.userId;
 
-        // Fetch completed assessments
-        const response = await axios.get(
-          `http://localhost:5000/api/assessments/status/${userId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        // Use the configured API client instead of direct axios
+        const response = await api.get(`/assessments/status/${userId}`);
 
         if (!response.data || !response.data.data) {
           throw new Error("Failed to fetch progress data");

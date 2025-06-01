@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../components/DashboardLayout";
-import axios from "axios";
+import CommunicationOverview from "../components/assessment/CommunicationOverview";
+import api from "../services/api";
 import { decodeJWT } from "../utils/jwt";
 
 const CompletedAssessmentCard = ({ assessment, onViewResults }) => {
@@ -85,6 +86,7 @@ const CompletedAssessmentCard = ({ assessment, onViewResults }) => {
 const AssessmentsPage = () => {
   const [assessments, setAssessments] = useState([]);
   const [completedAssessments, setCompletedAssessments] = useState([]);
+  const [hasCommunicationAssessments, setHasCommunicationAssessments] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -94,7 +96,19 @@ const AssessmentsPage = () => {
       console.error('Assessment is missing category');
       return;
     }
-    // Navigate to the assessment details page first
+    
+    // Special handling for Communication Skills Assessment
+    if (
+      assessment.title === 'Communication Skills Assessment' || 
+      assessment.category === 'communication' ||
+      assessment.title.toLowerCase().includes('communication')
+    ) {
+      // Navigate to the communication-assessment route
+      navigate('/communication-assessment');
+      return;
+    }
+    
+    // Navigate to the assessment details page for other assessments
     navigate(`/assessment/category/${assessment.category}`);
   };
 
@@ -131,14 +145,7 @@ const AssessmentsPage = () => {
         console.log("User ID from token:", userId);
 
         // Fetch assessments and their status
-        const response = await axios.get(
-          `http://localhost:5000/api/assessments/status/${userId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        const response = await api.get(`/assessments/status/${userId}`);
 
         if (!response.data || !response.data.data) {
           throw new Error("Failed to fetch assessments");
@@ -160,6 +167,12 @@ const AssessmentsPage = () => {
           }));
           
         setCompletedAssessments(completed);
+        
+        // Check if user has completed any communication-related assessments
+        const hasCommunication = completed.some(a => 
+          ['communication', 'reading', 'writing', 'listening', 'speaking'].includes(a.assessmentType.toLowerCase())
+        );
+        setHasCommunicationAssessments(hasCommunication);
       } catch (err) {
         console.error("Error fetching assessments:", err);
         setError(err.response?.data?.message || err.message || "Failed to load assessments");
@@ -263,6 +276,17 @@ const AssessmentsPage = () => {
             <h2 className="text-2xl font-semibold text-[#592538] mb-6">
               Your Completed Assessments
             </h2>
+            
+            {/* Show Communication Overview only if user has completed any communication-related assessments */}
+            {hasCommunicationAssessments && (
+              <div className="mb-8">
+                <h3 className="text-lg font-semibold text-[#592538] mb-4">
+                  Communication Skills Progress
+                </h3>
+                <CommunicationOverview />
+              </div>
+            )}
+            
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {completedAssessments.map((assessment) => (
                 <CompletedAssessmentCard

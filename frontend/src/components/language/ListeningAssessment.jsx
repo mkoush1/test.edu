@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import CEFRService from '../../services/cefr.service';
+import listeningAssessmentService from '../../services/listeningAssessment.service.js';
 
 const ListeningAssessment = ({ onComplete, level, language, onBack }) => {
   const [answers, setAnswers] = useState([]);
@@ -17,6 +18,8 @@ const ListeningAssessment = ({ onComplete, level, language, onBack }) => {
   const [audioProgress, setAudioProgress] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const [assessmentData, setAssessmentData] = useState(null);
+  const [assessmentAvailability, setAssessmentAvailability] = useState(null);
+  const [assessmentUnavailable, setAssessmentUnavailable] = useState(false);
   const audioRef = useRef(null);
   const [trueFalseAnswers, setTrueFalseAnswers] = useState({});
   const [phraseMatchingAnswers, setPhraseMatchingAnswers] = useState({});
@@ -344,6 +347,36 @@ time.`;
   };
 
   useEffect(() => {
+    // Check if the user can take this assessment
+    const checkAvailability = async () => {
+      try {
+        setLoading(true);
+        const availabilityData = await listeningAssessmentService.checkAssessmentAvailability(level, language);
+        setAssessmentAvailability(availabilityData);
+        
+        // If assessment is not available, show a message and set state to indicate unavailability
+        if (availabilityData && !availabilityData.available) {
+          setAssessmentUnavailable(true);
+          setLoading(false);
+          return;
+        }
+        
+        // Continue loading questions if assessment is available
+        loadQuestions();
+      } catch (error) {
+        console.error("Error checking assessment availability:", error);
+        // Don't bypass the cooldown check on error
+        // Set a default unavailable message so user can't take assessment when we can't confirm availability
+        setAssessmentAvailability({
+          available: false,
+          message: 'Error checking assessment availability. Please try again later.',
+          nextAvailableDate: new Date(Date.now() + 60000) // Set a short cooldown (1 minute) to allow retrying
+        });
+        setAssessmentUnavailable(true);
+        setLoading(false);
+      }
+    };
+
     // Load questions based on language and level
     const loadQuestions = async () => {
       try {
@@ -394,6 +427,16 @@ time.`;
             // Initialize available words
             if (data.fillBlanks.options) {
               setAvailableWords(data.fillBlanks.options);
+            }
+          } else if (data.fillBlanksTask) {
+            const initialFillBlanks = {};
+            data.fillBlanksTask.sentences.forEach(sentence => {
+              initialFillBlanks[sentence.id] = "";
+            });
+            setFillBlanksAnswers(initialFillBlanks);
+            // Initialize available words
+            if (data.fillBlanksTask.options) {
+              setAvailableWords(data.fillBlanksTask.options);
             }
           }
 
@@ -497,8 +540,9 @@ time.`;
       }
     };
 
-    loadQuestions();
-  }, [level, language]);
+    // Start by checking availability
+    checkAvailability();
+  }, [level, language, onBack]);
 
   // Initialize audio element when it's loaded
   useEffect(() => {
@@ -547,22 +591,27 @@ time.`;
       audioRef.current.addEventListener('durationchange', handleAudioLoaded);
       audioRef.current.addEventListener('error', handleError);
       
+      // Store reference to current audio element for cleanup
+      const audioElement = audioRef.current;
+      
       return () => {
-        if (audioRef.current) {
-          audioRef.current.removeEventListener('loadedmetadata', handleAudioLoaded);
-          audioRef.current.removeEventListener('timeupdate', handleTimeUpdate);
-          audioRef.current.removeEventListener('durationchange', handleAudioLoaded);
-          audioRef.current.removeEventListener('error', handleError);
+        // Use the stored reference and check if it's still valid
+        if (audioElement) {
+          audioElement.removeEventListener('loadedmetadata', handleAudioLoaded);
+          audioElement.removeEventListener('timeupdate', handleTimeUpdate);
+          audioElement.removeEventListener('durationchange', handleAudioLoaded);
+          audioElement.removeEventListener('error', handleError);
         }
       };
     }
-  }, [audioRef.current]);
+  }, [audioRef.current, level]);
 
   useEffect(() => {
     if (timeLeft !== null) {
       if (timeLeft === 0) {
         setIsPlaying(false);
         setHasPlayed(true);
+        // Safely pause audio if it exists
         if (audioRef.current) {
           audioRef.current.pause();
         }
@@ -582,9 +631,15 @@ time.`;
     };
 
     if (audioRef.current) {
-      audioRef.current.addEventListener('ended', handleAudioEnd);
+      // Store reference to current audio element for cleanup
+      const audioElement = audioRef.current;
+      audioElement.addEventListener('ended', handleAudioEnd);
+      
       return () => {
-        audioRef.current.removeEventListener('ended', handleAudioEnd);
+        // Use the stored reference for cleanup
+        if (audioElement) {
+          audioElement.removeEventListener('ended', handleAudioEnd);
+        }
       };
     }
   }, [audioRef.current]);
@@ -904,6 +959,10 @@ time.`;
       return assessmentData.fillBlanks;
     }
     
+    if (assessmentData && assessmentData.fillBlanksTask) {
+      return assessmentData.fillBlanksTask;
+    }
+    
     if (level === 'b1') {
       const assessmentId = getAssessmentId();
       if (assessmentId === 'mars') {
@@ -1187,7 +1246,23 @@ time.`;
            trueFalseComplete && phraseMatchingComplete;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    // Clean up audio resources first
+    if (audioRef.current) {
+      try {
+        // Pause audio if playing
+        if (!audioRef.current.paused) {
+          audioRef.current.pause();
+        }
+        // Reset audio element
+        audioRef.current.currentTime = 0;
+        // Set src to empty to release resources
+        audioRef.current.src = "";
+      } catch (error) {
+        console.error("Error cleaning up audio:", error);
+      }
+    }
+    
     const score = calculateScore();
     let finalScore;
     let totalQuestions = questions.length;
@@ -1274,7 +1349,69 @@ time.`;
       feedback: CEFRService.generateFeedback(finalScore.percentage, level, 'listening')
     };
 
-    onComplete(results);
+    // Try to submit to backend
+    try {
+      // Prepare data for backend submission
+      const submissionData = {
+        level,
+        language,
+        score: finalScore.percentage,
+        correctAnswers: finalScore.correct,
+        totalQuestions: finalScore.totalQuestions,
+        answers,
+        feedback: results.feedback,
+        // Add task-specific answers if available
+        mcqAnswers: answers.reduce((acc, val, idx) => {
+          acc[idx] = val;
+          return acc;
+        }, {}),
+      };
+
+      // Add optional task answers if available
+      if (Object.keys(orderingAnswers).length > 0) {
+        submissionData.orderingAnswers = orderingAnswers;
+      }
+      
+      if (Object.keys(classificationAnswers).length > 0) {
+        submissionData.classificationAnswers = classificationAnswers;
+      }
+      
+      if (Object.keys(categorizationAnswers).length > 0) {
+        submissionData.categorizationAnswers = categorizationAnswers;
+      }
+      
+      if (Object.keys(fillBlanksAnswers).length > 0) {
+        submissionData.fillBlanksAnswers = fillBlanksAnswers;
+      }
+      
+      if (Object.keys(trueFalseAnswers).length > 0) {
+        submissionData.trueFalseAnswers = trueFalseAnswers;
+      }
+      
+      if (Object.keys(phraseMatchingAnswers).length > 0) {
+        submissionData.phraseMatchingAnswers = phraseMatchingAnswers;
+      }
+
+      console.log('Submitting listening assessment to backend:', submissionData);
+      
+      // Submit to backend
+      const response = await listeningAssessmentService.submitAssessment(submissionData);
+      
+      console.log('Backend submission response:', response);
+      
+      // If submission was successful, add assessment ID to results
+      if (response.success && response.assessment) {
+        results.assessmentId = response.assessment._id;
+      }
+    } catch (error) {
+      console.error('Error submitting to backend:', error);
+      // Continue with local completion even if backend submission fails
+    }
+
+    // Short timeout to ensure audio cleanup is complete before unmounting
+    setTimeout(() => {
+      onComplete(results);
+    }, 0);
   };
 
   // Handle changes to the true/false task
@@ -1417,6 +1554,81 @@ time.`;
     handlePhraseMatchingChange(itemId, "");
   };
 
+  // Final cleanup of audio resources when component unmounts
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        try {
+          // Pause audio if playing
+          if (!audioRef.current.paused) {
+            audioRef.current.pause();
+          }
+          // Remove src to release resources
+          audioRef.current.src = "";
+        } catch (error) {
+          console.error("Error cleaning up audio on unmount:", error);
+        }
+      }
+    };
+  }, []);
+
+  // If assessment is unavailable, show a message instead of the assessment
+  if (assessmentUnavailable && assessmentAvailability) {
+    const nextDate = new Date(assessmentAvailability.nextAvailableDate);
+    
+    return (
+      <div className="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
+        <div className="mb-6 border-l-4 border-blue-500 p-6 rounded-lg mb-6">
+          <div className="flex items-start">
+            <div className="flex-shrink-0 mr-4">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-blue-800 mb-2">Assessment Cooldown Period</h3>
+              <p className="text-blue-700 mb-3">
+                You've already taken this listening assessment. Our system enforces a 7-day waiting period between assessment attempts to ensure meaningful progress tracking.
+              </p>
+              <p className="text-blue-700 font-medium">
+                You can take this assessment again on {nextDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
+              </p>
+              
+              {assessmentAvailability.previousAssessment && (
+                <div className="mt-5 pt-4 border-t border-blue-200">
+                  <h4 className="font-medium text-blue-800 mb-2">Your Previous Result</h4>
+                  <div className="flex items-center">
+                    <div className="w-16 h-16 rounded-full bg-white border-2 border-blue-300 flex items-center justify-center mr-4">
+                      <span className="text-xl font-bold text-blue-700">
+                        {Math.round(assessmentAvailability.previousScore)}%
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-blue-700">Completed on: {new Date(assessmentAvailability.previousAssessment.completedAt).toLocaleDateString()}</p>
+                      <p className="text-blue-700">Score: {assessmentAvailability.previousScore.toFixed(1)}%</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <div className="mt-6">
+                <button 
+                  onClick={onBack} 
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" clipRule="evenodd" />
+                  </svg>
+                  Return to Assessments
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (loading || (!questions && !assessmentData)) {
     return (
       <div className="max-w-3xl mx-auto p-6 bg-white rounded-lg shadow-lg">
@@ -1433,7 +1645,7 @@ time.`;
   return (
     <div className="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
       <div className="mb-6">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-6 border-b pb-4">
           <h2 className="text-2xl font-bold text-[#592538]">
             Listening Assessment - {level.toUpperCase()}
           </h2>
@@ -1446,208 +1658,247 @@ time.`;
         </div>
 
         <div className="mb-8">
-          <h3 className="text-xl font-medium mb-2">
+          <h3 className="text-xl font-medium mb-4 text-gray-800">
             {level === 'a1' ? 'A voicemail message' : 
              level === 'a2' && getAssessmentId() === 'morning-briefing' ? 'A morning briefing' : 
              level === 'a2' && getAssessmentId() === 'briefing' ? 'A briefing' : 
+             level === 'b1' ? 'A student discussion about Mars and Earth' :
+             level === 'b2' ? 'A design presentation' :
+             level === 'c1' ? 'A job interview' :
              'Listening Assessment'}
           </h3>
-          <p className="text-gray-600 mb-4">
-            {level === 'a1' 
-              ? 'Listen to a voicemail message and answer the questions to practise your listening skills.'
-              : level === 'a2' && getAssessmentId() === 'morning-briefing'
-              ? 'Listen to a morning briefing at a restaurant and answer the questions to practise your listening skills.'
-              : level === 'a2' && getAssessmentId() === 'briefing'
-              ? 'Listen to a briefing at a workplace and answer the questions to practise your listening skills.'
-              : 'Listen to the audio and answer the questions to practice your listening skills.'}
-          </p>
-          
-          {/* Audio Section */}
-          <div className="bg-gray-50 p-6 rounded-lg mb-6">
-            {/* Hidden audio element for playing the actual audio files */}
-            <audio 
-              ref={audioRef}
-              preload="auto"
-              className="hidden"
-              onError={(e) => {
-                console.error("Audio failed to load:", e);
-                console.log("Audio element error details:", e.target.error);
-                setHasPlayed(true); // Allow assessment to continue even if audio fails
-                if (level === 'b2') {
-                  console.log("B2 level - proceeding without audio");
-                }
-              }}
-            >
-              {assessmentData && assessmentData.audioUrl && (
-                <source 
-                  src={assessmentData.audioUrl} 
-                  type="audio/mpeg"
-                />
-              )}
-              {questions && questions[0] && questions[0].audioUrl && (
-                <source 
-                  src={questions[0].audioUrl} 
-                  type="audio/mpeg"
-                />
-              )}
-              {level === 'b1' && (
-                <source 
-                  src="/Listening/B1/LE_listening_B1_Student_discussion.mp3" 
-                  type="audio/mpeg"
-                />
-              )}
-              {level === 'b2' && (
-                <source 
-                  src="/Listening/B2/Design Presntaion/LE_listening_B2_A_design_presentation.mp3" 
-                  type="audio/mpeg"
-                />
-              )}
-              {level === 'a1' && (
-                <source 
-                  src="/Listening/A1/A Voice Message/LE_listening_A1_A_voicemail_message.mp3" 
-                  type="audio/mpeg"
-                />
-              )}
-              {level === 'a2' && (
-                <source 
-                  src="/Listening/A2/Briefing/LE_listening_A2_Briefing.mp3" 
-                  type="audio/mpeg"
-                />
-              )}
-              Your browser does not support the audio element.
-            </audio>
+          <div className="bg-gray-50 p-6 rounded-lg mb-6 border border-gray-200">
+            <p className="text-gray-700 mb-4">
+              {level === 'a1' 
+                ? 'Listen to a voicemail message and answer the questions to practice your listening skills.'
+                : level === 'a2' && getAssessmentId() === 'morning-briefing'
+                ? 'Listen to a morning briefing at a restaurant and answer the questions to practice your listening skills.'
+                : level === 'a2' && getAssessmentId() === 'briefing'
+                ? 'Listen to a briefing at a workplace and answer the questions to practice your listening skills.'
+                : level === 'b1'
+                ? 'Listen to students discussing Mars and Earth, then complete the tasks to practice your listening skills.'
+                : level === 'b2'
+                ? 'Listen to a design presentation and complete the tasks to practice your listening skills.'
+                : level === 'c1'
+                ? 'Listen to a job interview and answer the questions to practice your listening skills.'
+                : 'Listen to the audio and answer the questions to practice your listening skills.'}
+            </p>
+            
+            <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+              {/* Hidden audio element for playing the actual audio files */}
+              <audio 
+                ref={audioRef}
+                preload="auto"
+                className="hidden"
+                onError={(e) => {
+                  console.error("Audio failed to load:", e);
+                  console.log("Audio element error details:", e.target.error);
+                  setHasPlayed(true); // Allow assessment to continue even if audio fails
+                  if (level === 'b2') {
+                    console.log("B2 level - proceeding without audio");
+                  }
+                }}
+              >
+                {assessmentData && assessmentData.audioUrl && (
+                  <source 
+                    src={assessmentData.audioUrl} 
+                    type="audio/mpeg"
+                  />
+                )}
+                {questions && questions[0] && questions[0].audioUrl && (
+                  <source 
+                    src={questions[0].audioUrl} 
+                    type="audio/mpeg"
+                  />
+                )}
+                {level === 'b1' && (
+                  <source 
+                    src="/Listening/B1/LE_listening_B1_Student_discussion.mp3" 
+                    type="audio/mpeg"
+                  />
+                )}
+                {level === 'b2' && (
+                  <source 
+                    src="/Listening/B2/Design Presntaion/LE_listening_B2_A_design_presentation.mp3" 
+                    type="audio/mpeg"
+                  />
+                )}
+                {level === 'a1' && (
+                  <source 
+                    src="/Listening/A1/A Voice Message/LE_listening_A1_A_voicemail_message.mp3" 
+                    type="audio/mpeg"
+                  />
+                )}
+                {level === 'a2' && (
+                  <source 
+                    src="/Listening/A2/Briefing/LE_listening_A2_Briefing.mp3" 
+                    type="audio/mpeg"
+                  />
+                )}
+                Your browser does not support the audio element.
+              </audio>
 
-            <div className="flex flex-col items-center">
-              {!hasPlayed ? (
-                <div className="text-center mb-4">
-                  <p className="text-gray-600 mb-3">
-                    Listen to the audio and complete the tasks below
-                  </p>
-                </div>
-              ) : null}
-              
-              <div className="w-full max-w-md bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center space-x-2">
-                    {!isPlaying ? (
-                <button
-                        onClick={hasPlayed ? resumeAudio : playAudio}
-                        className="w-12 h-12 rounded-full bg-[#592538] text-white flex items-center justify-center hover:bg-[#6d2c44] transition-colors"
-                        aria-label="Play"
-                >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-                  </svg>
-                </button>
-                    ) : (
-                      <button
-                        onClick={pauseAudio}
-                        className="w-12 h-12 rounded-full bg-[#592538] text-white flex items-center justify-center hover:bg-[#6d2c44] transition-colors"
-                        aria-label="Pause"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 00-1 1v2a1 1 0 002 0V9a1 1 0 00-1-1zm4 0a1 1 0 00-1 1v2a1 1 0 002 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
-                        </svg>
-                      </button>
-                    )}
-                    
+              <div className="flex flex-col items-center">
+                {!hasPlayed ? (
+                  <div className="text-center mb-6">
+                    <p className="text-gray-700 mb-3">
+                      Listen to the audio and complete the tasks below
+                    </p>
                     <button
-                      onClick={restartAudio}
-                      className="w-10 h-10 rounded-full bg-gray-200 text-gray-700 flex items-center justify-center hover:bg-gray-300 transition-colors ml-2"
-                      aria-label="Restart"
+                      onClick={playAudio}
+                      className="w-20 h-20 rounded-full bg-[#592538] text-white flex items-center justify-center hover:bg-[#6d2c44] transition-colors shadow-md"
+                      aria-label="Play"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
                       </svg>
                     </button>
-              </div>
-                  
-                  <div className="text-gray-600 text-sm font-medium">
-                    {formatTime(audioProgress)} / {formatTime(audioDuration)}
-                </div>
-              </div>
-                
-                <div className="w-full">
-                  <input
-                    type="range"
-                    min="0"
-                    max={audioDuration || 100}
-                    value={audioProgress}
-                    onChange={handleProgressChange}
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#592538]"
-                  />
-                  
-                  {isPlaying && (
-                    <div className="w-full flex justify-between mt-3">
-                      <div className="flex items-center space-x-1">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-[#592538]" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071a1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243a1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828a1 1 0 010-1.415z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-xs font-medium text-[#592538]">Now Playing</span>
+                    <p className="text-gray-500 text-sm mt-3">Click to start audio</p>
+                  </div>
+                ) : (
+                  <div className="w-full max-w-lg bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center space-x-3">
+                        {!isPlaying ? (
+                          <button
+                            onClick={resumeAudio}
+                            className="w-12 h-12 rounded-full bg-[#592538] text-white flex items-center justify-center hover:bg-[#6d2c44] transition-colors shadow-sm"
+                            aria-label="Play"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                            </svg>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={pauseAudio}
+                            className="w-12 h-12 rounded-full bg-[#592538] text-white flex items-center justify-center hover:bg-[#6d2c44] transition-colors shadow-sm"
+                            aria-label="Pause"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 00-1 1v2a1 1 0 002 0V9a1 1 0 00-1-1zm4 0a1 1 0 00-1 1v2a1 1 0 002 0V9a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                          </button>
+                        )}
+                        
+                        <button
+                          onClick={restartAudio}
+                          className="w-10 h-10 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center hover:bg-gray-200 transition-colors shadow-sm"
+                          aria-label="Restart"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                          </svg>
+                        </button>
                       </div>
-                      <div className="text-xs font-medium text-gray-500">
-                        Time Remaining: {formatTime(timeLeft)}
+                      
+                      <div className="text-gray-700 text-sm font-medium px-3 py-1 bg-gray-100 rounded-lg">
+                        {formatTime(audioProgress)} / {formatTime(audioDuration)}
                       </div>
-              </div>
-            )}
-                </div>
-          </div>
+                    </div>
+                    
+                    <div className="w-full">
+                      <div className="relative w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+                        <div 
+                          className="absolute top-0 left-0 h-full bg-[#592538]" 
+                          style={{ width: `${(audioProgress / audioDuration) * 100}%` }}
+                        ></div>
+                        <input
+                          type="range"
+                          min="0"
+                          max={audioDuration || 100}
+                          value={audioProgress}
+                          onChange={handleProgressChange}
+                          className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
+                        />
+                      </div>
+                      
+                      {isPlaying && (
+                        <div className="w-full flex justify-between mt-4">
+                          <div className="flex items-center space-x-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-[#592538]" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071a1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243a1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828a1 1 0 010-1.415z" clipRule="evenodd" />
+                            </svg>
+                            <span className="text-xs font-medium text-[#592538]">Now Playing</span>
+                          </div>
+                          <div className="text-xs font-medium px-2 py-1 bg-[#592538]/10 rounded-full text-[#592538]">
+                            Time Remaining: {formatTime(timeLeft)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
-          {hasPlayed && (
-                <div className="mt-4">
-                  <button
-                    onClick={() => setShowTranscript(!showTranscript)}
-                    className="px-4 py-2 bg-[#592538] text-white rounded-lg hover:bg-[#6d2c44] transition-colors"
-                  >
-                    {showTranscript ? 'Hide Transcript' : 'Show Transcript'}
-                  </button>
-                </div>
-              )}
+                {hasPlayed && (
+                  <div className="mt-4">
+                    <button
+                      onClick={() => setShowTranscript(!showTranscript)}
+                      className="px-4 py-2 border border-[#592538] text-[#592538] rounded-lg hover:bg-[#592538]/5 transition-colors flex items-center"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                      </svg>
+                      {showTranscript ? 'Hide Transcript' : 'Show Transcript'}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
           {/* Transcript Section */}
           {showTranscript && (
-            <div className="bg-gray-50 p-4 rounded-lg mb-8 border border-gray-200">
-              <h4 className="font-medium text-lg mb-3">Transcript</h4>
-              <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono p-4 bg-white rounded border border-gray-200">
+            <div className="bg-gray-50 p-5 rounded-lg mb-8 border border-gray-200">
+              <h4 className="font-medium text-lg mb-3 text-[#592538] flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                </svg>
+                Transcript
+              </h4>
+              <div className="whitespace-pre-wrap text-sm text-gray-700 font-mono p-4 bg-white rounded border border-gray-200 max-h-80 overflow-y-auto">
                 {getTranscript()}
-              </pre>
+              </div>
             </div>
           )}
 
           {/* Assessment Tasks - Always visible regardless of audio played state */}
           {level !== 'b1' && level !== 'b2' && questions.length > 0 && !questions[0].question.includes("_hidden_question_") && (
-            <div className="mb-8">
-              <h4 className="font-medium text-lg mb-3">Task 1</h4>
-              <p className="text-gray-600 mb-4">Choose the best answer.</p>
+            <div className="mb-8 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+              <h4 className="font-medium text-lg mb-3 text-[#592538] flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                </svg>
+                Task 1
+              </h4>
+              <p className="text-gray-700 mb-5 pl-7">Choose the best answer for each question.</p>
 
               <div className="space-y-6">
                 {questions.map((question, questionIndex) => (
-                  <div key={questionIndex} className="border border-gray-200 rounded-lg p-4">
+                  <div key={questionIndex} className="border border-gray-200 rounded-lg p-5 hover:border-gray-300 transition-colors">
                     <p className="text-[#592538] font-medium mb-4">{question.question}</p>
-                    <div className="space-y-3">
+                    <div className="space-y-3 pl-2">
                       {question.options.map((option, optionIndex) => (
                         <div
                           key={optionIndex}
-                    className={`p-3 border rounded cursor-pointer ${
+                          className={`p-3 border rounded-lg cursor-pointer transition-all ${
                             answers[questionIndex] === optionIndex
-                        ? 'border-[#592538] bg-[#592538]/10'
-                        : 'border-gray-300 hover:border-[#592538]/50'
-                    }`}
+                              ? 'border-[#592538] bg-[#592538]/5 shadow-sm'
+                              : 'border-gray-200 hover:border-[#592538]/30 hover:bg-gray-50'
+                          }`}
                           onClick={() => handleAnswer(questionIndex, optionIndex)}
-                  >
-                    <div className="flex items-center">
-                      <div className={`h-5 w-5 rounded-full mr-3 flex items-center justify-center border ${
+                        >
+                          <div className="flex items-center">
+                            <div className={`h-5 w-5 rounded-full mr-3 flex items-center justify-center border transition-colors ${
                               answers[questionIndex] === optionIndex
-                          ? 'bg-[#592538] border-[#592538]'
-                          : 'border-gray-400'
-                      }`}>
+                                ? 'bg-[#592538] border-[#592538]'
+                                : 'border-gray-400'
+                            }`}>
                               {answers[questionIndex] === optionIndex && (
-                          <div className="h-2 w-2 rounded-full bg-white"></div>
-                        )}
-                      </div>
-                      <span>{option}</span>
+                                <div className="h-2 w-2 rounded-full bg-white"></div>
+                              )}
+                            </div>
+                            <span className={answers[questionIndex] === optionIndex ? 'font-medium' : ''}>{option}</span>
                           </div>
                         </div>
                       ))}
@@ -1660,23 +1911,28 @@ time.`;
 
           {/* Task 2: Ordering */}
           {getOrderingTask() && (
-            <div className="mb-8">
-              <h4 className="font-medium text-lg mb-3">{getOrderingTask().title}</h4>
-              <p className="text-gray-600 mb-4">{getOrderingTask().instructions}</p>
+            <div className="mb-8 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+              <h4 className="font-medium text-lg mb-3 text-[#592538] flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                </svg>
+                {getOrderingTask().title}
+              </h4>
+              <p className="text-gray-700 mb-5 pl-7">{getOrderingTask().instructions}</p>
 
               <div className="space-y-4 mb-6">
                 {getOrderingTask().items.map((item, index) => (
-                  <div key={item.id} className="flex items-center p-3 border border-gray-200 rounded-lg">
+                  <div key={item.id} className="flex items-center p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors bg-gray-50">
                     <input 
                       type="number" 
                       min="1" 
                       max={getOrderingTask().items.length} 
                       value={orderingAnswers[index] || ''}
                       onChange={(e) => handleOrderingChange(index, parseInt(e.target.value) || 0)}
-                      className="w-12 h-10 border border-gray-300 rounded-md text-center mr-4 focus:border-[#592538] focus:ring-[#592538]"
+                      className="w-12 h-10 border border-gray-300 rounded-md text-center mr-4 focus:border-[#592538] focus:ring-[#592538] shadow-sm"
                     />
                     <span>{item.text}</span>
-        </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1684,21 +1940,31 @@ time.`;
 
           {/* Task 2: Classification */}
           {getClassificationTask() && (
-            <div className="mb-8">
-              <h4 className="font-medium text-lg mb-3">{getClassificationTask().title}</h4>
-              <p className="text-gray-600 mb-4">{getClassificationTask().instructions}</p>
+            <div className="mb-8 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+              <h4 className="font-medium text-lg mb-3 text-[#592538] flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+                </svg>
+                {getClassificationTask().title}
+              </h4>
+              <p className="text-gray-700 mb-5 pl-7">{getClassificationTask().instructions}</p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                  <h5 className="font-medium mb-3">Phrases to classify:</h5>
+                <div className="bg-gray-50 p-5 rounded-lg border border-gray-200">
+                  <h5 className="font-medium mb-4 text-gray-700 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
+                    </svg>
+                    Phrases to classify:
+                  </h5>
                   <div className="space-y-3">
                     {getClassificationTask().items.map(item => (
                       <div 
                         key={item.id}
-                        className={`p-3 bg-white border rounded-lg cursor-pointer ${
+                        className={`p-3 bg-white border rounded-lg cursor-pointer transition-all ${
                           classificationAnswers[item.id] 
-                            ? 'border-[#592538] bg-[#592538]/5' 
-                            : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-[#592538] bg-[#592538]/5 shadow-sm' 
+                            : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
                         }`}
                         onClick={() => {
                           if (classificationAnswers[item.id]) {
@@ -1717,19 +1983,25 @@ time.`;
                       </div>
                     ))}
                   </div>
-        </div>
+                </div>
 
                 <div className="flex flex-col space-y-4">
                   {getClassificationTask().categories.map(category => (
                     <div key={category.id} className="bg-white p-4 rounded-lg border-2 border-[#592538]">
-                      <h5 className="font-medium text-[#592538] mb-3">{category.name}</h5>
+                      <h5 className="font-medium text-[#592538] mb-3 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M5 5a3 3 0 015-2.236A3 3 0 0114.83 6H16a2 2 0 110 4h-5V9a1 1 0 10-2 0v1H4a2 2 0 110-4h1.17C5.06 5.687 5 5.35 5 5zm4 1V5a1 1 0 10-1 1h1zm3 0a1 1 0 10-1-1v1h1z" clipRule="evenodd" />
+                          <path d="M9 11H3v5a2 2 0 002 2h4v-7zM11 18h4a2 2 0 002-2v-5h-6v7z" />
+                        </svg>
+                        {category.name}
+                      </h5>
                       <div className="min-h-36 p-3 bg-gray-50 rounded-lg border border-dashed border-gray-300">
                         {getClassificationTask().items.filter(item => classificationAnswers[item.id] === category.id).map(item => (
-                          <div key={item.id} className="mb-2 p-2 bg-white rounded border border-gray-200 flex justify-between items-center">
+                          <div key={item.id} className="mb-2 p-2 bg-white rounded border border-gray-200 flex justify-between items-center shadow-sm">
                             <span>{item.text}</span>
-          <button
+                            <button
                               onClick={() => handleClassificationChange(item.id, null)}
-                              className="text-gray-500 hover:text-[#592538]"
+                              className="text-gray-500 hover:text-[#592538] transition-colors"
                             >
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -1746,7 +2018,7 @@ time.`;
                               handleClassificationChange(unassignedItem.id, category.id);
                             }
                           }}
-                          className="w-full mt-2 py-1 border border-dashed border-[#592538] text-sm text-[#592538] rounded hover:bg-[#592538]/5"
+                          className="w-full mt-2 py-1 border border-dashed border-[#592538] text-sm text-[#592538] rounded hover:bg-[#592538]/5 transition-colors"
                         >
                           Drop item here
                         </button>
@@ -1760,21 +2032,31 @@ time.`;
 
           {/* Task 1: Categorization for B1 level */}
           {getCategorization() && (
-            <div className="mb-8">
-              <h4 className="font-medium text-lg mb-3">{getCategorization().title}</h4>
-              <p className="text-gray-600 mb-4">{getCategorization().instructions}</p>
+            <div className="mb-8 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+              <h4 className="font-medium text-lg mb-3 text-[#592538] flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+                </svg>
+                {getCategorization().title}
+              </h4>
+              <p className="text-gray-700 mb-5 pl-7">{getCategorization().instructions}</p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                  <h5 className="font-medium mb-3">Phrases to classify:</h5>
+                <div className="bg-gray-50 p-5 rounded-lg border border-gray-200">
+                  <h5 className="font-medium mb-4 text-gray-700 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
+                    </svg>
+                    Characteristics to categorize:
+                  </h5>
                   <div className="space-y-3">
                     {getCategorization().items.map(item => (
                       <div 
                         key={item.id}
-                        className={`p-3 bg-white border rounded-lg cursor-pointer ${
+                        className={`p-3 bg-white border rounded-lg cursor-pointer transition-all ${
                           categorizationAnswers[item.id] 
-                            ? 'border-[#592538] bg-[#592538]/5' 
-                            : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-[#592538] bg-[#592538]/5 shadow-sm' 
+                            : 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
                         }`}
                         onClick={() => {
                           if (categorizationAnswers[item.id]) {
@@ -1798,23 +2080,28 @@ time.`;
                 <div className="flex flex-col space-y-4">
                   {getCategorization().categories.map(category => (
                     <div key={category.id} className="bg-white p-4 rounded-lg border-2 border-[#592538]">
-                      <h5 className="font-medium text-[#592538] mb-3">{category.name}</h5>
+                      <h5 className="font-medium text-[#592538] mb-3 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                          <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                        </svg>
+                        {category.name}
+                      </h5>
                       <div className="min-h-36 p-3 bg-gray-50 rounded-lg border border-dashed border-gray-300">
                         {getCategorization().items.filter(item => categorizationAnswers[item.id] === category.id).map(item => (
-                          <div key={item.id} className="mb-2 p-2 bg-white rounded border border-gray-200 flex justify-between items-center">
+                          <div key={item.id} className="mb-2 p-2 bg-white rounded border border-gray-200 flex justify-between items-center shadow-sm">
                             <span>{item.text}</span>
                             <button 
                               onClick={() => handleCategorizationChange(item.id, null)}
-                              className="text-gray-500 hover:text-[#592538]"
+                              className="text-gray-500 hover:text-[#592538] transition-colors"
                             >
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
                               </svg>
-          </button>
+                            </button>
                           </div>
                         ))}
           
-            <button
+                        <button
                           onClick={() => {
                             // Find the first unassigned item
                             const unassignedItem = getCategorization().items.find(item => !categorizationAnswers[item.id]);
@@ -1822,10 +2109,10 @@ time.`;
                               handleCategorizationChange(unassignedItem.id, category.id);
                             }
                           }}
-                          className="w-full mt-2 py-1 border border-dashed border-[#592538] text-sm text-[#592538] rounded hover:bg-[#592538]/5"
+                          className="w-full mt-2 py-1 border border-dashed border-[#592538] text-sm text-[#592538] rounded hover:bg-[#592538]/5 transition-colors"
                         >
                           Drop item here
-            </button>
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1836,17 +2123,30 @@ time.`;
 
           {/* Task 2: Fill in the blanks */}
           {getFillBlanksTask() && (
-            <div className="mb-8">
-              <h4 className="font-medium text-lg mb-3">{getFillBlanksTask().title}</h4>
-              <p className="text-gray-600 mb-4">{getFillBlanksTask().instructions}</p>
+            <div className="mb-8 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+              <h4 className="font-medium text-lg mb-3 text-[#592538] flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                </svg>
+                {getFillBlanksTask().title}
+              </h4>
+              <p className="text-gray-700 mb-5 pl-7">{getFillBlanksTask().instructions}</p>
 
-              <div className="bg-white p-4 rounded-lg border border-gray-300 mb-6">
-                <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="bg-gray-50 p-5 rounded-lg border border-gray-200 mb-6">
+                <h5 className="font-medium mb-4 text-gray-700 flex items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
+                  </svg>
+                  Available words:
+                </h5>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-center">
                   {getFillBlanksTask().options.map((word, index) => (
                     <div 
                       key={index} 
-                      className={`p-2 text-lg font-medium border border-gray-200 rounded-md cursor-grab ${
-                        isWordUsed(word) ? 'opacity-50 bg-gray-100' : 'bg-white hover:bg-gray-50'
+                      className={`p-2 text-lg font-medium border rounded-md cursor-grab transition-all ${
+                        isWordUsed(word) 
+                          ? 'opacity-50 bg-gray-100 border-gray-300' 
+                          : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm'
                       }`}
                       draggable={!isWordUsed(word)}
                       onDragStart={(e) => handleDragStart(e, word)}
@@ -1857,18 +2157,18 @@ time.`;
                 </div>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {getFillBlanksTask().sentences.map((sentence, index) => {
                   // Split the sentence text at the blank marker
                   const parts = sentence.text.split('________');
                   
                   return (
-                    <div key={sentence.id} className="flex items-center gap-1 p-2">
-                      <span className="text-lg">{index + 1}.</span>
+                    <div key={sentence.id} className="flex items-center gap-2 p-3 bg-white border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
+                      <span className="text-lg font-medium text-[#592538] mr-2">{index + 1}.</span>
                       <div className="flex flex-wrap items-center">
                         <span className="text-lg">{parts[0]}</span>
                         <div 
-                          className={`w-40 h-10 mx-2 border-b-2 border-dashed flex items-center justify-center ${
+                          className={`w-40 h-10 mx-2 border-b-2 border-dashed flex items-center justify-center transition-colors ${
                             fillBlanksAnswers[sentence.id] ? 'border-[#592538]' : 'border-gray-400'
                           }`}
                           onDragOver={handleDragOver}
@@ -1877,15 +2177,15 @@ time.`;
                           {fillBlanksAnswers[sentence.id] ? (
                             <div className="flex items-center justify-between w-full px-2">
                               <span className="font-medium text-[#592538]">{fillBlanksAnswers[sentence.id]}</span>
-            <button
+                              <button
                                 onClick={() => clearFillBlankAnswer(sentence.id)}
-                                className="text-gray-400 hover:text-[#592538]"
+                                className="text-gray-400 hover:text-[#592538] transition-colors"
                               >
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                                   <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
                                 </svg>
-            </button>
-          </div>
+                              </button>
+                            </div>
                           ) : (
                             <span className="text-gray-400 text-sm">Drag word here</span>
                           )}
@@ -1901,35 +2201,50 @@ time.`;
 
           {/* Task 1: True/False for B2 level */}
           {getTrueFalseTask() && (
-            <div className="mb-8">
-              <h4 className="font-medium text-lg mb-3">{getTrueFalseTask().title}</h4>
-              <p className="text-gray-600 mb-4">{getTrueFalseTask().instructions}</p>
+            <div className="mb-8 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+              <h4 className="font-medium text-lg mb-3 text-[#592538] flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                {getTrueFalseTask().title}
+              </h4>
+              <p className="text-gray-700 mb-5 pl-7">{getTrueFalseTask().instructions}</p>
 
               <div className="space-y-4">
                 {getTrueFalseTask().items.map((item) => (
-                  <div key={item.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex justify-between">
+                  <div key={item.id} className="border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors">
+                    <div className="flex justify-between items-center flex-wrap gap-4">
                       <p className="text-[#592538] font-medium">{item.id}. {item.text}</p>
-                      <div className="flex space-x-4">
+                      <div className="flex space-x-3">
                         <button
                           onClick={() => handleTrueFalseChange(item.id, true)}
-                          className={`px-4 py-1 rounded-md ${
+                          className={`px-5 py-2 rounded-md transition-all ${
                             trueFalseAnswers[item.id] === true
-                              ? 'bg-[#592538] text-white'
+                              ? 'bg-[#592538] text-white shadow-sm'
                               : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                           }`}
                         >
-                          True
+                          <div className="flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                            True
+                          </div>
                         </button>
                         <button
                           onClick={() => handleTrueFalseChange(item.id, false)}
-                          className={`px-4 py-1 rounded-md ${
+                          className={`px-5 py-2 rounded-md transition-all ${
                             trueFalseAnswers[item.id] === false
-                              ? 'bg-[#592538] text-white'
+                              ? 'bg-[#592538] text-white shadow-sm'
                               : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                           }`}
                         >
-                          False
+                          <div className="flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                            False
+                          </div>
                         </button>
                       </div>
                     </div>
@@ -1941,17 +2256,31 @@ time.`;
 
           {/* Task 2: Phrase Matching for B2 level */}
           {getPhraseMatchingTask() && (
-            <div className="mb-8">
-              <h4 className="font-medium text-lg mb-3">{getPhraseMatchingTask().title}</h4>
-              <p className="text-gray-600 mb-4">{getPhraseMatchingTask().instructions}</p>
+            <div className="mb-8 bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+              <h4 className="font-medium text-lg mb-3 text-[#592538] flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M3 4a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 2V5h1v1H5zM3 13a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3zm2 2v-1h1v1H5zM13 3a1 1 0 00-1 1v3a1 1 0 001 1h3a1 1 0 001-1V4a1 1 0 00-1-1h-3zm1 2v1h1V5h-1z" clipRule="evenodd" />
+                  <path d="M11 4a1 1 0 10-2 0v1a1 1 0 002 0V4zM10 7a1 1 0 011 1v1h2a1 1 0 110 2h-3a1 1 0 01-1-1V8a1 1 0 011-1zM16 9a1 1 0 100 2 1 1 0 000-2zM9 13a1 1 0 011-1h1a1 1 0 110 2v2a1 1 0 11-2 0v-3zM7 11a1 1 0 100-2H4a1 1 0 100 2h3zM17 13a1 1 0 01-1 1h-2a1 1 0 110-2h2a1 1 0 011 1zM16 17a1 1 0 100-2h-3a1 1 0 100 2h3z" />
+                </svg>
+                {getPhraseMatchingTask().title}
+              </h4>
+              <p className="text-gray-700 mb-5 pl-7">{getPhraseMatchingTask().instructions}</p>
               
-              <div className="bg-white p-4 rounded-lg border border-gray-300 mb-6">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+              <div className="bg-gray-50 p-5 rounded-lg border border-gray-200 mb-6">
+                <h5 className="font-medium mb-4 text-gray-700 flex items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z" />
+                  </svg>
+                  Available phrases:
+                </h5>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-center">
                   {getPhraseMatchingTask().phrases.map((phrase, index) => (
                     <div 
                       key={index} 
-                      className={`p-2 text-sm font-medium border border-gray-200 rounded-md cursor-grab ${
-                        isPhraseUsed(phrase) ? 'opacity-50 bg-gray-100' : 'bg-white hover:bg-gray-50'
+                      className={`p-3 text-sm font-medium border rounded-md cursor-grab transition-all ${
+                        isPhraseUsed(phrase) 
+                          ? 'opacity-50 bg-gray-100 border-gray-300' 
+                          : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm'
                       }`}
                       draggable={!isPhraseUsed(phrase)}
                       onDragStart={(e) => handlePhraseDragStart(e, phrase)}
@@ -1962,15 +2291,15 @@ time.`;
                 </div>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {getPhraseMatchingTask().items.map((item) => (
-                  <div key={item.id} className="flex items-start gap-2 p-3 border border-gray-200 rounded-lg">
-                    <span className="text-lg font-medium text-[#592538] mr-2">{item.id}.</span>
+                  <div key={item.id} className="flex items-start gap-3 p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
+                    <span className="text-lg font-medium text-[#592538] pt-1">{item.id}.</span>
                     <div className="flex-1">
-                      <p className="mb-2">{item.text}</p>
+                      <p className="mb-3">{item.text}</p>
                       <div 
-                        className={`h-12 border-2 border-dashed flex items-center px-2 ${
-                          phraseMatchingAnswers[item.id] ? 'border-[#592538]' : 'border-gray-400'
+                        className={`h-12 border-2 border-dashed flex items-center px-3 rounded-md transition-colors ${
+                          phraseMatchingAnswers[item.id] ? 'border-[#592538] bg-[#592538]/5' : 'border-gray-400'
                         }`}
                         onDragOver={handlePhraseDragOver}
                         onDrop={(e) => handlePhraseDrop(e, item.id)}
@@ -1980,7 +2309,7 @@ time.`;
                             <span className="font-medium text-[#592538]">{phraseMatchingAnswers[item.id]}</span>
                             <button
                               onClick={() => clearPhraseAnswer(item.id)}
-                              className="text-gray-400 hover:text-[#592538]"
+                              className="text-gray-400 hover:text-[#592538] transition-colors"
                             >
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -1999,11 +2328,11 @@ time.`;
           )}
 
           {/* Submit Button */}
-          <div className="flex justify-end">
+          <div className="mt-8 flex justify-center">
             <button
               onClick={handleSubmit}
-              className={`px-6 py-3 bg-[#592538] text-white rounded-lg hover:bg-[#6d2c44] flex items-center ${
-                !allQuestionsAnswered() ? 'opacity-50 cursor-not-allowed' : ''
+              className={`px-6 py-3 bg-[#592538] text-white rounded-lg hover:bg-[#6d2c44] flex items-center shadow-md transition-all ${
+                !allQuestionsAnswered() ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-lg'
               }`}
               disabled={!allQuestionsAnswered()}
             >

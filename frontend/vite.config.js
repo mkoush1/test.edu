@@ -16,10 +16,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'http://localhost:5003',
         changeOrigin: true,
       },
-      '/auth': 'http://localhost:5000',
+      '/auth': 'http://localhost:5003',
     },
     // Add history API fallback for client-side routing
     historyApiFallback: true,

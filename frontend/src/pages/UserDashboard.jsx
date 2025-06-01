@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../components/DashboardLayout";
 import AssessmentCard from "../components/AssessmentCard";
-import axios from "axios";
+import api from "../services/api";
 import { decodeJWT } from "../utils/jwt";
 // import '../styles/Dashboard.css';
 
@@ -40,6 +40,9 @@ const UserDashboard = () => {
 
   const fetchDashboardData = async () => {
     try {
+      setLoading(true);
+      setError(null);
+      
       const token = localStorage.getItem("token");
       if (!token) {
         navigate("/login");
@@ -57,27 +60,14 @@ const UserDashboard = () => {
       const userId = decodedToken.userId;
       console.log("Fetching dashboard data...");
       console.log("User ID from token:", userId);
-      console.log("Token:", token);
 
       // Fetch available assessments
-      const assessmentsResponse = await axios.get(
-        "http://localhost:5000/api/assessments",
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      const assessmentsResponse = await api.get("/assessments");
       console.log("Assessments response:", assessmentsResponse.data);
 
       // Fetch user's assessment status
-      const statusResponse = await axios.get(
-        `http://localhost:5000/api/assessments/status/${userId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
+      const statusResponse = await api.get(
+        `/assessments/status/${userId}`
       );
       console.log("Status response:", statusResponse.data);
 
@@ -97,7 +87,7 @@ const UserDashboard = () => {
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
       console.error("Error response:", error.response);
-      setError("Failed to load dashboard data");
+      setError("Failed to load dashboard data. Please try again.");
       setLoading(false);
     }
   };
@@ -125,6 +115,10 @@ const UserDashboard = () => {
     navigate(`/assessment/${assessment.category || assessment.assessmentType}/recommendations`);
   };
 
+  const handleRetry = () => {
+    fetchDashboardData();
+  };
+
   if (loading) {
     return (
       <DashboardLayout title="Dashboard Overview">
@@ -137,42 +131,17 @@ const UserDashboard = () => {
 
   if (error) {
     return (
-      <div className="flex flex-col h-screen bg-[#592538]">
-        <div className="flex items-center justify-center h-16 bg-[#4a1d2d]">
-          <h2 className="text-xl font-semibold text-white">Dashboard</h2>
-        </div>
-        <nav className="flex flex-col space-y-1">
-          <SidebarItem icon="📊" text="Dashboard" active={location.pathname === "/dashboard"} onClick={() => navigate("/dashboard")} />
-          <SidebarItem icon="📝" text="Assessments" onClick={() => navigate("/assessments")} />
-          <SidebarItem icon="🎯" text="Progress" onClick={() => navigate("/progress")} />
-          <SidebarItem icon="📊" text="Reports" onClick={() => navigate("/reports")} />
-          <SidebarItem icon="📚" text="Recommendations" onClick={() => navigate("/recommendations")} />
-          <SidebarItem icon="⚙️" text="Settings" onClick={() => navigate("/settings")} />
-        </nav>
-
-        {/* Assessments Section */}
-        <div className="bg-white rounded-xl shadow-md p-6">
-          <h2 className="text-2xl font-bold text-[#592538] mb-6">
-            Available Assessments
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {assessments.map((assessment) => (
-              <AssessmentCard key={assessment._id} assessment={assessment} />
-            ))}
-          </div>
-        </div>
-
-        {/* Test Page Link */}
-        <div className="mt-8 bg-white rounded-xl shadow-md p-6">
-          <h2 className="text-2xl font-bold text-[#592538] mb-6">Test Pages</h2>
+      <DashboardLayout title="Dashboard Overview">
+        <div className="flex flex-col items-center justify-center h-64 bg-white p-8 rounded-xl shadow-md">
+          <div className="text-[#592538] text-xl mb-4">{error}</div>
           <button
-            onClick={() => navigate("/presentation-fetch")}
+            onClick={handleRetry}
             className="px-6 py-3 bg-[#592538] text-white rounded-lg hover:bg-[#6d2c44] transition duration-300"
           >
-            Test Presentation Videos
+            Try Again
           </button>
         </div>
-      </div>
+      </DashboardLayout>
     );
   }
 
@@ -191,13 +160,19 @@ const UserDashboard = () => {
           Your Assessments
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {assessments.map((assessment) => (
-            <AssessmentCard
-              key={assessment._id || assessment.assessmentType}
-              assessment={assessment}
-              onViewResults={handleViewResults}
-            />
-          ))}
+          {assessments.length > 0 ? (
+            assessments.map((assessment) => (
+              <AssessmentCard
+                key={assessment._id || assessment.assessmentType}
+                assessment={assessment}
+                onViewResults={handleViewResults}
+              />
+            ))
+          ) : (
+            <div className="col-span-3 text-center py-8 text-gray-500">
+              No assessments available at the moment.
+            </div>
+          )}
         </div>
       </div>
 

@@ -531,49 +531,52 @@ router.get('/results/completed', authenticateToken, async (req, res) => {
 // Get user's assessment status
 router.get('/status/:userId', authenticateToken, async (req, res) => {
   try {
-    const userId = req.params.userId;
-    console.log('Getting assessment status for user:', userId);
-
-    // Get all available assessments
-    const availableAssessments = await Assessment.find();
-    console.log('Available assessments:', availableAssessments.length);
-
-    // Get user's completed assessments
+    const { userId } = req.params;
+    
+    // Verify the user exists
     const user = await User.findById(userId);
     if (!user) {
-      console.error('User not found:', userId);
-      return res.status(404).json({
-        success: false,
-        error: 'User not found'
-      });
+      return res.status(404).json({ message: 'User not found' });
     }
-    console.log('User found:', user._id);
-    console.log('Completed assessments:', user.completedAssessments);
-
-    const completedAssessmentTypes = user.completedAssessments.map(a => a.assessmentType);
-    console.log('Completed assessment types:', completedAssessmentTypes);
-
-    // Filter out completed assessments
-    const remainingAssessments = availableAssessments.filter(
-      assessment => !completedAssessmentTypes.includes(assessment.category)
-    );
-    console.log('Remaining assessments:', remainingAssessments.length);
-
+    
+    // Get all available assessments
+    const availableAssessments = await Assessment.find({});
+    const totalAvailable = availableAssessments.length;
+    
+    // Get completed assessments for the user
+    const completedResults = await AssessmentResult.find({ userId });
+    const completedAssessmentTypes = completedResults.map(result => result.assessmentType);
+    
+    // Mark assessments as completed or not
+    const assessments = availableAssessments.map(assessment => ({
+      ...assessment.toObject(),
+      isCompleted: completedAssessmentTypes.includes(assessment.category),
+      score: completedResults.find(r => r.assessmentType === assessment.category)?.percentage || 0,
+      completedAt: completedResults.find(r => r.assessmentType === assessment.category)?.completedAt
+    }));
+    
+    // Calculate progress
+    const totalCompleted = completedAssessmentTypes.length;
+    const progress = totalAvailable > 0 ? (totalCompleted / totalAvailable) * 100 : 0;
+    
     res.json({
       success: true,
       data: {
-        availableAssessments: remainingAssessments,
-        completedAssessments: user.completedAssessments,
-        totalAvailable: remainingAssessments.length,
-        totalCompleted: user.totalAssessmentsCompleted,
-        progress: user.progress
+        assessments,
+        totalAvailable,
+        totalCompleted,
+        completed: completedAssessmentTypes,
+        progress,
+        availableAssessments: assessments.filter(a => !a.isCompleted),
+        completedAssessments: user.completedAssessments || []
       }
     });
   } catch (error) {
-    console.error('Error getting assessment status:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get assessment status'
+    console.error('Error fetching assessment status:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching assessment status', 
+      error: error.message 
     });
   }
 });

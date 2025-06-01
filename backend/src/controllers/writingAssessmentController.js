@@ -1,5 +1,6 @@
 // writingAssessmentController.js
 import writingAssessmentService from '../services/writingAssessmentService.js';
+import writingAssessmentTrackerService from '../services/writingAssessmentTrackerService.js';
 
 /**
  * Controller for writing assessment endpoints
@@ -63,6 +64,193 @@ class WritingAssessmentController {
       return res.status(500).json({
         success: false,
         message: 'Failed to evaluate writing',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Generate a new writing prompt based on level and language
+   * @param {Request} req - Express request object
+   * @param {Response} res - Express response object
+   */
+  async generatePrompt(req, res) {
+    try {
+      const { level, language } = req.query;
+      
+      console.log('Writing assessment generatePrompt called with query params:', req.query);
+      console.log('Generating writing prompt for:', { level, language });
+      
+      // Validate request
+      if (!level || !language) {
+        console.error('Missing required parameters:', { level, language });
+        return res.status(400).json({
+          success: false,
+          message: 'Level and language are required'
+        });
+      }
+      
+      // Validate level
+      const validLevels = ['a1', 'a2', 'b1', 'b2', 'c1', 'c2'];
+      if (!validLevels.includes(level.toLowerCase())) {
+        console.error('Invalid level:', level);
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid level. Must be one of: a1, a2, b1, b2, c1, c2'
+        });
+      }
+      
+      // Validate language
+      const validLanguages = ['english', 'french'];
+      if (!validLanguages.includes(language.toLowerCase())) {
+        console.error('Invalid language:', language);
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid language. Must be one of: english, french'
+        });
+      }
+      
+      console.log('Validation passed, calling writingAssessmentService.generateWritingPrompt');
+      
+      // Generate prompt using service
+      const prompt = await writingAssessmentService.generateWritingPrompt(level, language);
+      
+      console.log('Prompt generated successfully:', {
+        title: prompt?.title,
+        promptLength: prompt?.prompt?.length || 0,
+        timeLimit: prompt?.timeLimit,
+        wordLimit: prompt?.wordLimit,
+        criteriaCount: prompt?.criteria?.length || 0
+      });
+      
+      // Return the generated prompt
+      console.log('Sending successful response to client');
+      return res.status(200).json({
+        success: true,
+        prompt
+      });
+    } catch (error) {
+      console.error('Error in generatePrompt controller:', {
+        message: error.message,
+        stack: error.stack
+      });
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to generate writing prompt',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Check if user can take an assessment (based on cooldown period)
+   * @param {Request} req - Express request object
+   * @param {Response} res - Express response object
+   */
+  async checkAssessmentAvailability(req, res) {
+    try {
+      console.log('WritingAssessmentController.checkAssessmentAvailability called');
+      
+      const userId = req.user?.id;
+      const { language, level } = req.query;
+      
+      if (!userId) {
+        console.log('Validation failed: User not authenticated');
+        return res.status(401).json({
+          success: false,
+          message: 'User must be authenticated to check assessment availability'
+        });
+      }
+      
+      if (!language || !level) {
+        console.log('Validation failed: Missing language or level');
+        return res.status(400).json({
+          success: false,
+          message: 'Language and level are required parameters'
+        });
+      }
+      
+      console.log(`Checking writing assessment availability for user ${userId}, language ${language}, level ${level}`);
+      
+      // Check if user can take assessment (7-day cooldown)
+      const availability = await writingAssessmentTrackerService.canTakeAssessment(
+        userId, language, level
+      );
+      
+      if (availability.available) {
+        return res.status(200).json({
+          success: true,
+          canTakeAssessment: true,
+          message: 'User can take writing assessment'
+        });
+      } else {
+        // Calculate days remaining
+        const now = new Date();
+        const daysRemaining = Math.ceil((availability.nextAvailableDate - now) / (24 * 60 * 60 * 1000));
+        
+        return res.status(200).json({
+          success: true,
+          canTakeAssessment: false,
+          nextAvailableDate: availability.nextAvailableDate,
+          daysRemaining: daysRemaining,
+          lastAssessment: availability.lastAssessment,
+          message: `Cooldown period not yet passed, ${daysRemaining} days remaining`
+        });
+      }
+    } catch (error) {
+      console.error('Error in checkAssessmentAvailability controller:', error);
+      
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to check assessment availability: ' + error.message,
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get user's writing assessment history
+   * @param {Request} req - Express request object
+   * @param {Response} res - Express response object
+   */
+  async getUserAssessments(req, res) {
+    try {
+      console.log('WritingAssessmentController.getUserAssessments called');
+      
+      const userId = req.user?.id;
+      
+      if (!userId) {
+        console.log('Validation failed: User not authenticated');
+        return res.status(401).json({
+          success: false,
+          message: 'User must be authenticated to get assessment history'
+        });
+      }
+      
+      console.log(`Getting writing assessment history for user ${userId}`);
+      
+      // Get user's assessment history
+      const assessments = await writingAssessmentTrackerService.getUserAssessments(userId);
+      
+      return res.status(200).json({
+        success: true,
+        assessments: assessments.map(assessment => ({
+          id: assessment._id,
+          language: assessment.language,
+          level: assessment.level,
+          prompt: assessment.prompt,
+          score: assessment.score,
+          completedAt: assessment.completedAt,
+          nextAvailableDate: assessment.nextAvailableDate,
+          criteria: assessment.criteria
+        }))
+      });
+    } catch (error) {
+      console.error('Error in getUserAssessments controller:', error);
+      
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to get user assessments: ' + error.message,
         error: error.message
       });
     }

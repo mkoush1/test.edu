@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Typography, CircularProgress, Grid, Card, CardContent } from '@mui/material';
-import axios from 'axios';
+import api from '../services/api';
 
 const AssessmentStatus = ({ userId, status: propStatus }) => {
   const [status, setStatus] = useState({
@@ -29,7 +29,7 @@ const AssessmentStatus = ({ userId, status: propStatus }) => {
   const fetchAssessmentStatus = async () => {
     try {
       console.log('Fetching status for user:', userId);
-      const response = await axios.get(`/api/assessment/status/${userId}`);
+      const response = await api.get(`/assessments/status/${userId}`);
       console.log('Status API response:', response.data);
       setStatus(response.data.data);
       setLoading(false);

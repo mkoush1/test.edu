@@ -483,13 +483,168 @@ time.`
         questions: [
           {
             id: 1,
-            audioUrl: `/Listening/C1/LE_listening_C1_Lecture.mp3`,
-            question: "What is the main argument presented in the lecture?",
-            options: ["Economic theory", "Social psychology", "Political science", "Environmental policy"],
-            correctAnswer: 3,
-            duration: 150
+            audioUrl: `/Listening/C1/A Job Interview/LE_listening_C1_A_job_interview.mp3`,
+            question: "Four years ago, Maria worked for a small HR services provider ...",
+            options: ["in the B2B sector.", "in the B2C sector.", "in both B2B and B2C sectors."],
+            correctAnswer: 0,
+            duration: 180
+          },
+          {
+            id: 2,
+            audioUrl: `/Listening/C1/A Job Interview/LE_listening_C1_A_job_interview.mp3`,
+            question: "Maria has been in her current job ...",
+            options: ["for four years.", "for three years.", "for one year."],
+            correctAnswer: 1,
+            duration: 180
+          },
+          {
+            id: 3,
+            audioUrl: `/Listening/C1/A Job Interview/LE_listening_C1_A_job_interview.mp3`,
+            question: "Maria's current role is focused ...",
+            options: ["only on learning and development.", "on a number of HR topics.", "only on payroll and she wants to do L&D."],
+            correctAnswer: 1,
+            duration: 180
+          },
+          {
+            id: 4,
+            audioUrl: `/Listening/C1/A Job Interview/LE_listening_C1_A_job_interview.mp3`,
+            question: "Maria ...",
+            options: ["did a diploma in L&D two years ago.", "is doing a diploma in psychology at the moment.", "Both options are true."],
+            correctAnswer: 2,
+            duration: 180
+          },
+          {
+            id: 5,
+            audioUrl: `/Listening/C1/A Job Interview/LE_listening_C1_A_job_interview.mp3`,
+            question: "Maria will need to ...",
+            options: ["identify and devise an L&D strategy.", "devise and implement an L&D strategy.", "implement an L&D strategy that has already been devised."],
+            correctAnswer: 1,
+            duration: 180
+          },
+          {
+            id: 6,
+            audioUrl: `/Listening/C1/A Job Interview/LE_listening_C1_A_job_interview.mp3`,
+            question: "Maria ...",
+            options: ["will hear back from them next week.", "has been invited to a second interview next week.", "needs to call them next week to find out the next steps."],
+            correctAnswer: 0,
+            duration: 180
           }
-        ]
+        ],
+        audioUrl: `/Listening/C1/A Job Interview/LE_listening_C1_A_job_interview.mp3`,
+        fillBlanksTask: {
+          title: "Task 2",
+          instructions: "Complete the sentences with words from the box.",
+          options: [
+            "personal",
+            "good fit",
+            "aligned",
+            "replicated",
+            "stability",
+            "measured",
+            "responsible",
+            "report"
+          ],
+          sentences: [
+            {
+              id: 1,
+              text: "Maria feels her skills and experience are a ________ for the company.",
+              answer: "good fit"
+            },
+            {
+              id: 2,
+              text: "Maria changed jobs because she was looking for more ________ .",
+              answer: "stability"
+            },
+            {
+              id: 3,
+              text: "She was ________ for learning and development.",
+              answer: "responsible"
+            },
+            {
+              id: 4,
+              text: "She feels ________ with the company's brand and values.",
+              answer: "aligned"
+            },
+            {
+              id: 5,
+              text: "She's used to taking a ________ approach to L&D.",
+              answer: "personal"
+            },
+            {
+              id: 6,
+              text: "Her ideas can be ________ on a larger scale.",
+              answer: "replicated"
+            },
+            {
+              id: 7,
+              text: "She would ________ to the HR manager.",
+              answer: "report"
+            },
+            {
+              id: 8,
+              text: "Performance will be ________ in different ways.",
+              answer: "measured"
+            }
+          ]
+        },
+        transcript: `Interviewer: Hello, Maria. Thanks for coming in for the interview.
+Maria: It's my pleasure. Thanks for inviting me.
+Interviewer: Well, as you know, the company has been expanding and we have an opening in
+our HR department. We're creating a new role for someone to lead our training and
+development within the company.
+Maria: Yes, I very much think that my skills and experience are a good fit for what you're
+looking for.
+Interviewer: That sounds great. So, your CV looks strong, though it would be good if you
+could give us an overview, in your own words, of what you've been doing over the past four
+years or so.
+Maria: Well, in my first job, four years ago, I was working for a small HR services provider
+which offered HR services, including L&D, to corporate clients.
+Interviewer: OK, so it was only B2B?
+Maria: Yes, we only offered services to other companies, not B2C.
+Interviewer: Right, and it says here you then left that company about three years ago.
+Maria: Yes, that's right. I was looking for a little more stability and also to be part of a larger
+organisation. So I joined a company with around one hundred staff and a small HR team. As
+there are only a few of us, we each deal with a range of HR topics. In addition to payroll, one
+of the areas I was responsible for was learning and development.
+Interviewer: I see. And, so why do you want to change jobs now?
+Maria: Well, I very much like the L&D side of my role and I've always had particularly good
+feedback for my work in this area. I believe I excel in that field. So, I'm looking to specialise,
+and as your company has around 2,000 people, right …?
+Interviewer: Yes, that's right.
+Maria: Well, an organisation of this size would give me the scope to specialise in L&D. I'm also
+a big follower of your brand and feel fully aligned with your image and values.
+Interviewer: Well, that all sounds good. And I can see you have an L&D qualification.
+Maria: Yes, I got a diploma two years ago. I am also currently working on a further diploma in
+psychology, with a specific focus on learning and performance management.
+Interviewer: Very good. Well, it looks like you have the qualifications and experience we're
+looking for. What do you think will be the main challenges of coming to a much larger
+company?
+Maria: I can see that it might be perceived as a weakness to not have experience in an
+organisation of this size, though I see that it could also be a benefit. I won't be bringing too
+many preconceived and possibly inflexible ideas with me to the role.
+Interviewer: Yes, that would be a good thing.
+Maria: Also, I'm used to taking a very personal approach to employee development. I realise
+that such an approach with 2,000 staff members will have to happen in a different way, but I
+bring many ideas with me that can be replicated on a larger scale.
+Interviewer: I see what you mean. Right, so, do you have any questions for me?
+Maria: Um, I think we've covered many of the areas I had wanted to address. I have two quick
+questions though.
+Interviewer: Go on.
+Maria: Who would I mostly work with on a daily basis?
+Interviewer: Well, there's the HR manager who you would report to. And then the HR team,
+which currently has six people in it. There's usually an intern or two who you can get some
+support from also.
+Maria: OK. Thanks. That's all really clear. And my other question is how performance in this
+role will be measured. What does success look like?
+Interviewer: That's a good question. As you know, we have a performance management
+system in place, and from that we have identified some learning and development needs
+within the organisation. But we haven't devised a strategy. Your role would be to devise and
+then successfully implement this strategy.
+Maria: Thank you. That sounds interesting.
+Interviewer: Great. So, thanks again for coming in today. We'll be discussing all candidates
+next week and then I'll get back to you by the end of next week to let you know the outcome.
+Maria: Thank you for your time. I'd welcome the opportunity to continue discussing this role
+with you.`
       }
     };
 
@@ -898,46 +1053,143 @@ time.`
   },
 
   /**
-   * Generate feedback based on score and level
-   * @param {number} score - Score percentage
-   * @param {string} level - CEFR level
-   * @param {string} skill - Skill type
-   * @returns {string} - Feedback message
+   * Generate feedback based on score, level and skill
+   * @param {number} score - Score percentage (0-100)
+   * @param {string} level - CEFR level (a1, a2, b1, b2, c1, c2)
+   * @param {string} skill - Skill type (reading, writing, listening, speaking)
+   * @returns {string} - Personalized feedback
    */
   generateFeedback(score, level, skill) {
-    const skillMap = {
-      reading: {
-        high: 'excellent reading comprehension',
-        medium: 'good reading skills',
-        low: 'basic reading comprehension'
-      },
-      writing: {
-        high: 'excellent writing skills',
-        medium: 'good writing ability',
-        low: 'basic writing skills'
-      },
-      listening: {
-        high: 'excellent listening comprehension',
-        medium: 'good listening skills',
-        low: 'basic listening comprehension'
-      },
-      speaking: {
-        high: 'excellent speaking skills',
-        medium: 'good speaking ability',
-        low: 'basic speaking skills'
-      }
-    };
-
-    const skillFeedback = skillMap[skill] || skillMap.reading;
-
-    if (score >= 80) {
-      return `You demonstrate ${skillFeedback.high} at ${level.toUpperCase()} level. Your performance shows strong language proficiency appropriate for this level.`;
-    } else if (score >= 60) {
-      return `You show ${skillFeedback.medium} at ${level.toUpperCase()} level. You can understand and use language at this level with only minor difficulties.`;
-    } else if (score >= 40) {
-      return `You demonstrate ${skillFeedback.low} at ${level.toUpperCase()} level, but would benefit from more practice to improve consistency and accuracy.`;
+    // Format level for display
+    const formattedLevel = level.toUpperCase();
+    
+    // Generic feedback based on score
+    if (score < 30) {
+      return `Your ${skill} skills are currently below ${formattedLevel} level. Focus on building your fundamentals and practice regularly to improve.`;
+    } else if (score < 50) {
+      return `Your ${skill} skills are approaching ${formattedLevel} level. With continued practice, you'll be able to meet the requirements for this level.`;
+    } else if (score < 70) {
+      return `Your ${skill} skills are at a basic ${formattedLevel} level. You have a good foundation, but there's room for improvement in several areas.`;
+    } else if (score < 85) {
+      return `Your ${skill} skills are at a solid ${formattedLevel} level. You demonstrate good proficiency in most aspects of ${skill} at this level.`;
     } else {
-      return `This level appears challenging for you. Consider practicing with materials at a lower level before attempting ${level.toUpperCase()} level again.`;
+      return `Your ${skill} skills are excellent at ${formattedLevel} level. You demonstrate mastery of ${skill} skills at this level and may be ready to advance to the next level.`;
+    }
+  },
+  
+  /**
+   * Get recommendations based on score, level and skill
+   * @param {number} score - Score percentage (0-100)
+   * @param {string} level - CEFR level (a1, a2, b1, b2, c1, c2)
+   * @param {string} skill - Skill type (reading, writing, listening, speaking)
+   * @returns {Array} - List of personalized recommendations
+   */
+  getRecommendations(score, level, skill) {
+    // Common recommendations for different score ranges
+    if (score < 30) {
+      if (skill === 'writing') {
+        return [
+          'Focus on basic sentence structures and grammar fundamentals',
+          'Practice writing simple sentences about everyday topics',
+          'Learn essential vocabulary for common situations',
+          'Use language learning apps for daily practice',
+          'Consider working with a tutor for personalized guidance'
+        ];
+      } else if (skill === 'speaking') {
+        return [
+          'Practice basic pronunciation regularly',
+          'Learn phrases for everyday conversations',
+          'Record yourself speaking and listen for areas to improve',
+          'Try to speak with native speakers in simple conversations',
+          'Use language learning apps with speech recognition'
+        ];
+      } else {
+        return [
+          'Focus on learning basic vocabulary',
+          'Practice regularly with content appropriate for your level',
+          'Use language learning apps for daily practice',
+          'Break down learning into small, manageable sessions',
+          'Join a study group or find a language partner'
+        ];
+      }
+    } else if (score < 60) {
+      if (skill === 'writing') {
+        return [
+          'Work on connecting your ideas with appropriate transition words',
+          'Expand your vocabulary with more precise and varied word choices',
+          'Practice writing paragraphs with clear topic sentences',
+          'Review common grammar rules that you find challenging',
+          'Read articles in your target language to learn from good examples'
+        ];
+      } else if (skill === 'speaking') {
+        return [
+          'Work on improving your pronunciation of difficult sounds',
+          'Practice speaking at a natural pace',
+          'Expand your vocabulary for more specific topics',
+          'Learn common idioms and expressions',
+          'Have regular conversations with more fluent speakers'
+        ];
+      } else {
+        return [
+          'Expand your vocabulary beyond basic words',
+          'Practice with varied content from different sources',
+          'Focus on understanding context and main ideas',
+          'Join conversation groups to practice regularly',
+          'Use flashcards or spaced repetition software for vocabulary'
+        ];
+      }
+    } else if (score < 85) {
+      if (skill === 'writing') {
+        return [
+          'Work on developing more complex sentence structures',
+          'Practice organizing longer texts with effective introductions and conclusions',
+          'Learn to adapt your writing style for different purposes',
+          'Expand your vocabulary with more sophisticated and nuanced terms',
+          'Seek feedback from proficient writers or teachers'
+        ];
+      } else if (skill === 'speaking') {
+        return [
+          'Work on speaking with better intonation and rhythm',
+          'Practice expressing more complex ideas fluently',
+          'Learn to adapt your speaking style for different contexts',
+          'Record presentations and analyze your speaking patterns',
+          'Join debate or discussion groups for practice'
+        ];
+      } else {
+        return [
+          'Challenge yourself with authentic materials at your level',
+          'Practice understanding different accents and speaking styles',
+          'Focus on building specialized vocabulary in areas of interest',
+          'Try to understand implicit meanings beyond literal content',
+          'Engage with native content like news, podcasts, or books'
+        ];
+      }
+    } else {
+      if (skill === 'writing') {
+        return [
+          'Focus on nuanced expression and advanced stylistic techniques',
+          'Practice writing different text types (essays, reports, narratives)',
+          'Study advanced grammar structures and incorporate them naturally',
+          'Analyze and emulate the writing style of accomplished authors',
+          'Consider preparing for advanced language certification'
+        ];
+      } else if (skill === 'speaking') {
+        return [
+          'Work on near-native fluency and natural expression',
+          'Practice discussing abstract concepts and complex topics',
+          'Refine your accent for clearer communication',
+          'Learn to use humor, irony, and cultural references appropriately',
+          'Consider preparing for advanced speaking certifications'
+        ];
+      } else {
+        return [
+          'Engage with advanced authentic materials in your areas of interest',
+          'Focus on understanding cultural nuances and references',
+          'Practice with content that uses specialized or academic language',
+          'Train your ear to understand different regional accents',
+          'Consider preparing for advanced language certification'
+        ];
+      }
     }
   },
 

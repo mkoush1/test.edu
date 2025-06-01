@@ -15,6 +15,14 @@ class WritingAssessmentController {
     this.getUserWritingAssessments = this.getUserWritingAssessments.bind(this);
     this.checkWritingAssessmentAvailability = this.checkWritingAssessmentAvailability.bind(this);
     this.getWritingAssessmentById = this.getWritingAssessmentById.bind(this);
+    this.generatePrompt = this.generatePrompt.bind(this);
+    
+    // Simple cache for generated prompts to prevent duplicate API calls
+    this.promptCache = new Map();
+    this.cacheTTL = 5 * 60 * 1000; // 5 minutes cache TTL
+    
+    // Track ongoing requests to prevent duplicates
+    this.pendingRequests = new Map();
   }
 
   /**
@@ -116,6 +124,7 @@ class WritingAssessmentController {
       // Prepare criteria array from task metrics or AI evaluation
       let criteria = [];
       
+      // First, extract criteria properly to ensure consistency
       if (task.aiEvaluation && task.aiEvaluation.criteria) {
         criteria = task.aiEvaluation.criteria.map(criterion => ({
           name: criterion.name,
@@ -130,6 +139,20 @@ class WritingAssessmentController {
         }));
       }
       
+      // Calculate the score consistently based on criteria
+      // Each criterion is out of 10, so total is out of 50, convert to percentage
+      const totalPoints = criteria.reduce((sum, criterion) => sum + criterion.score, 0);
+      const calculatedScore = Math.round((totalPoints / 50) * 100);
+      
+      // Log any discrepancy for debugging
+      if (score !== calculatedScore) {
+        console.log(`Score discrepancy detected in submission: Provided score ${score}%, calculated score ${calculatedScore}%`);
+      }
+      
+      // Always use the calculated score for consistency
+      const finalScore = calculatedScore;
+      console.log(`Using calculated score for consistency: ${finalScore}%`);
+      
       // Create a new assessment record
       const writingAssessment = new WritingAssessment({
         userId: userId,
@@ -137,7 +160,7 @@ class WritingAssessmentController {
         language: language,
         prompt: task.prompt,
         response: task.response,
-        score: score,
+        score: finalScore, // Use the consistent score
         feedback: feedback,
         criteria: criteria,
         completedAt: new Date(),
@@ -147,10 +170,15 @@ class WritingAssessmentController {
       // Save to database
       await writingAssessment.save();
       
+      // Return both scores to help with debugging
       return res.status(201).json({
         success: true,
         message: 'Writing assessment submitted successfully',
-        result: writingAssessment
+        result: {
+          ...writingAssessment.toObject(),
+          providedScore: score,
+          calculatedScore: finalScore
+        }
       });
     } catch (error) {
       console.error('Error in submitWritingAssessment controller:', error);
@@ -273,9 +301,29 @@ class WritingAssessmentController {
       
       const availability = await this.checkAssessmentAvailability(userId, level, language);
       
+      // If not available, try to get the last assessment for this level and language
+      let lastAssessment = null;
+      if (!availability.available && availability.nextAvailableDate) {
+        try {
+          // Find the most recent assessment for this user, level, and language
+          lastAssessment = await WritingAssessment.findOne({
+            userId: userId,
+            level: level,
+            language: language
+          }).sort({ completedAt: -1 }).lean();
+          
+          if (lastAssessment) {
+            console.log(`Found last assessment for user ${userId}, level ${level}, language ${language}`);
+          }
+        } catch (error) {
+          console.error('Error fetching last assessment:', error);
+        }
+      }
+      
       return res.status(200).json({
         success: true,
-        ...availability
+        ...availability,
+        lastAssessment
       });
     } catch (error) {
       console.error('Error checking writing assessment availability:', error);
@@ -333,6 +381,219 @@ class WritingAssessmentController {
         error: error.message
       });
     }
+  }
+
+  /**
+   * Generate a new writing prompt based on level and language
+   * @param {Request} req - Express request object
+   * @param {Response} res - Express response object
+   */
+  async generatePrompt(req, res) {
+    try {
+      const { level, language } = req.query;
+      
+      console.log('Writing assessment generatePrompt called with query params:', req.query);
+      console.log('Generating writing prompt for:', { level, language });
+      
+      // Validate request
+      if (!level || !language) {
+        console.error('Missing required parameters:', { level, language });
+        return res.status(400).json({
+          success: false,
+          message: 'Level and language are required'
+        });
+      }
+      
+      // Validate level
+      const validLevels = ['a1', 'a2', 'b1', 'b2', 'c1', 'c2'];
+      if (!validLevels.includes(level.toLowerCase())) {
+        console.error('Invalid level:', level);
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid level. Must be one of: a1, a2, b1, b2, c1, c2'
+        });
+      }
+      
+      // Validate language
+      const validLanguages = ['english', 'french'];
+      if (!validLanguages.includes(language.toLowerCase())) {
+        console.error('Invalid language:', language);
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid language. Must be one of: english, french'
+        });
+      }
+      
+      // Check if the user is authenticated
+      const userId = req.user?._id;
+      
+      // If user is authenticated, check if they can take the assessment
+      if (userId) {
+        const availability = await this.checkAssessmentAvailability(userId, level, language);
+        
+        // If user can't take the assessment, return the last assessment prompt
+        if (!availability.available && availability.nextAvailableDate) {
+          console.log(`User ${userId} cannot take assessment for level ${level}, language ${language}`);
+          
+          try {
+            // Find the most recent assessment for this user, level, and language
+            const lastAssessment = await WritingAssessment.findOne({
+              userId: userId,
+              level: level,
+              language: language
+            }).sort({ completedAt: -1 }).lean();
+            
+            if (lastAssessment && lastAssessment.prompt) {
+              console.log(`Returning last assessment prompt for user ${userId}`);
+              return res.status(200).json({
+                success: true,
+                prompt: {
+                  title: `${level.toUpperCase()} Writing Assessment`,
+                  prompt: lastAssessment.prompt,
+                  timeLimit: writingAssessmentService.getDefaultTimeLimit(level),
+                  wordLimit: writingAssessmentService.getDefaultWordLimit(level),
+                  criteria: writingAssessmentService.getDefaultCriteria(level, language),
+                  isLastAssessment: true
+                },
+                canTakeAssessment: false,
+                nextAvailableDate: availability.nextAvailableDate
+              });
+            }
+          } catch (error) {
+            console.error('Error fetching last assessment:', error);
+            // Continue with normal prompt generation if error occurs
+          }
+        }
+      }
+      
+      // Create cache key
+      const cacheKey = `${level.toLowerCase()}_${language.toLowerCase()}`;
+      
+      // Check cache first
+      const cachedPrompt = this.promptCache.get(cacheKey);
+      if (cachedPrompt) {
+        console.log('Using cached prompt for:', { level, language });
+        return res.status(200).json({
+          success: true,
+          prompt: cachedPrompt,
+          fromCache: true
+        });
+      }
+      
+      // Check if there's already a pending request for this prompt
+      if (this.pendingRequests.has(cacheKey)) {
+        console.log('Request already in progress for:', { level, language });
+        
+        try {
+          // Wait for the existing request to complete
+          const existingPromise = this.pendingRequests.get(cacheKey);
+          const result = await existingPromise;
+          
+          console.log('Using result from parallel request for:', { level, language });
+          return res.status(200).json({
+            success: true,
+            prompt: result,
+            fromParallelRequest: true
+          });
+        } catch (error) {
+          // If the existing request failed, we'll try again
+          console.error('Parallel request failed, proceeding with new request:', error.message);
+        }
+      }
+      
+      console.log('Validation passed, calling writingAssessmentService.generateWritingPrompt');
+      
+      // Create a promise for this request and store it
+      const promptPromise = this.generatePromptWithRetry(level, language);
+      this.pendingRequests.set(cacheKey, promptPromise);
+      
+      try {
+        // Wait for the prompt to be generated
+        const prompt = await promptPromise;
+        
+        // Store in cache
+        this.promptCache.set(cacheKey, prompt);
+        
+        // Set cache expiration
+        setTimeout(() => {
+          this.promptCache.delete(cacheKey);
+          console.log(`Cache expired for prompt: ${cacheKey}`);
+        }, this.cacheTTL);
+        
+        // Remove from pending requests
+        this.pendingRequests.delete(cacheKey);
+        
+        // Return the generated prompt
+        console.log('Sending successful response to client');
+        return res.status(200).json({
+          success: true,
+          prompt
+        });
+      } catch (error) {
+        // Remove from pending requests on error
+        this.pendingRequests.delete(cacheKey);
+        throw error;
+      }
+    } catch (error) {
+      console.error('Error in generatePrompt controller:', {
+        message: error.message,
+        stack: error.stack
+      });
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to generate writing prompt',
+        error: error.message
+      });
+    }
+  }
+  
+  /**
+   * Generate prompt with retry logic
+   * @param {string} level - CEFR level
+   * @param {string} language - Language
+   * @returns {Promise<Object>} - Generated prompt
+   */
+  async generatePromptWithRetry(level, language) {
+    const maxRetries = 2;
+    let attempt = 0;
+    let lastError = null;
+    
+    while (attempt < maxRetries) {
+      attempt++;
+      try {
+        // Generate prompt using service
+        console.log(`Attempt ${attempt}/${maxRetries} to generate AI prompt`);
+        const prompt = await writingAssessmentService.generateWritingPrompt(level, language);
+        
+        if (prompt) {
+          console.log('Prompt generated successfully:', {
+            title: prompt?.title,
+            promptLength: prompt?.prompt?.length || 0,
+            timeLimit: prompt?.timeLimit,
+            wordLimit: prompt?.wordLimit,
+            criteriaCount: prompt?.criteria?.length || 0
+          });
+          return prompt;
+        }
+      } catch (error) {
+        lastError = error;
+        console.error(`Error on attempt ${attempt}:`, error.message);
+        
+        // If we're rate limited (429), wait a bit longer before retrying
+        if (error.response?.status === 429 && attempt < maxRetries) {
+          const waitTime = 2000 * attempt; // 2 seconds, 4 seconds
+          console.log(`Rate limited, waiting ${waitTime}ms before retry`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        } else {
+          // For other errors, don't retry
+          break;
+        }
+      }
+    }
+    
+    // If we couldn't generate a prompt after retries
+    console.error('Failed to generate AI prompt after', maxRetries, 'attempts');
+    throw new Error(lastError?.message || 'Failed to generate AI writing prompt');
   }
 }
 

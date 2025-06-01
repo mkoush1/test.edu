@@ -69,14 +69,61 @@ const SpeakingAssessmentResults = ({ results: initialResults, onBack }) => {
   const [isMockData, setIsMockData] = useState(false);
   const [isRealAI, setIsRealAI] = useState(false);
   const [results, setResults] = useState(initialResults);
+  const barChartRef = useRef(null);
+  const chartInstanceRef = useRef(null);
+  
+  // Parse supervisor feedback if it's a JSON string
+  useEffect(() => {
+    if (results?.supervisorFeedback && typeof results.supervisorFeedback === 'string') {
+      try {
+        // Try to parse the JSON string
+        const parsedFeedback = JSON.parse(results.supervisorFeedback);
+        console.log('Parsed supervisor feedback:', parsedFeedback);
+        
+        // Update the results with the parsed feedback
+        setResults(prevResults => ({
+          ...prevResults,
+          parsedSupervisorFeedback: parsedFeedback,
+          // Extract the overall feedback from the parsed object
+          supervisorFeedbackText: parsedFeedback.overallFeedback || parsedFeedback,
+          // Extract criteria if available
+          supervisorCriteria: parsedFeedback.criteria || []
+        }));
+      } catch (error) {
+        console.error('Error parsing supervisor feedback JSON:', error);
+        // If parsing fails, use the string as is
+        setResults(prevResults => ({
+          ...prevResults,
+          supervisorFeedbackText: results.supervisorFeedback
+        }));
+      }
+    }
+  }, [results?.supervisorFeedback]);
 
-      // Update results when initialResults changes
+  // Update results when initialResults changes
   useEffect(() => {
     if (initialResults) {
       // Make sure type is set for consistent UI display
       if (!initialResults.type) {
         initialResults.type = 'speaking';
       }
+      
+      // Log the full results for debugging
+      console.log('SpeakingAssessmentResults received:', initialResults);
+      
+      // Check if supervisorFeedback needs parsing
+      if (initialResults.supervisorFeedback && typeof initialResults.supervisorFeedback === 'string') {
+        try {
+          const parsedFeedback = JSON.parse(initialResults.supervisorFeedback);
+          initialResults.parsedSupervisorFeedback = parsedFeedback;
+          initialResults.supervisorFeedbackText = parsedFeedback.overallFeedback || parsedFeedback;
+          initialResults.supervisorCriteria = parsedFeedback.criteria || [];
+          console.log('Parsed supervisor feedback during initialization:', parsedFeedback);
+        } catch (error) {
+          console.error('Error parsing supervisor feedback during initialization:', error);
+        }
+      }
+      
       setResults(initialResults);
     }
   }, [initialResults]);
@@ -520,16 +567,76 @@ const SpeakingAssessmentResults = ({ results: initialResults, onBack }) => {
                   </div>
                 </div>
               </div>
-        <div>
+              <div>
                 <h4 className="text-lg font-semibold text-gray-800">Expert Assessment</h4>
                 <p className="text-sm text-gray-600">
                   Evaluated on {results.evaluatedAt ? new Date(results.evaluatedAt).toLocaleDateString() : 'recent date'}
                 </p>
               </div>
             </div>
-            <div className="bg-white p-4 rounded-lg border border-green-100">
-              <p className="text-gray-700 whitespace-pre-wrap">{results.supervisorFeedback}</p>
+            
+            {/* Overall feedback */}
+            <div className="bg-white p-4 rounded-lg border border-green-100 mb-4">
+              <h5 className="font-semibold text-gray-800 mb-2">Overall Feedback:</h5>
+              <p className="text-gray-700 whitespace-pre-wrap">
+                {results.supervisorFeedbackText || 
+                 (results.parsedSupervisorFeedback?.overallFeedback) || 
+                 results.supervisorFeedback}
+              </p>
             </div>
+            
+            {/* Display supervisor criteria if available */}
+            {results.supervisorCriteria && results.supervisorCriteria.length > 0 && (
+              <div className="mt-4">
+                <h5 className="font-semibold text-gray-800 mb-2">Detailed Criteria Feedback:</h5>
+                <div className="grid grid-cols-1 gap-3">
+                  {results.supervisorCriteria.map((criterion, index) => (
+                    <div key={index} className="bg-white p-4 rounded-lg border border-green-100">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="font-medium text-gray-800">{criterion.name}</span>
+                        {criterion.score !== undefined && (
+                          <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-bold">
+                            {criterion.score}/{criterion.maxScore || 20}
+                          </span>
+                        )}
+                      </div>
+                      
+                      {/* Score Progress Bar */}
+                      {criterion.score !== undefined && (
+                        <div className="w-full bg-gray-200 rounded-full h-2.5 mb-3">
+                          <div 
+                            className="h-2.5 rounded-full bg-green-500" 
+                            style={{ 
+                              width: `${(criterion.score / (criterion.maxScore || 20)) * 100}%`, 
+                              transition: 'width 1s ease-out' 
+                            }}
+                          ></div>
+                        </div>
+                      )}
+                      
+                      {criterion.feedback && (
+                        <p className="text-sm text-gray-600 mt-2">{criterion.feedback}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Raw score display if available */}
+                {results.parsedSupervisorFeedback?.rawScore && (
+                  <div className="mt-4 bg-white p-4 rounded-lg border border-green-100">
+                    <div className="flex justify-between items-center">
+                      <span className="font-medium text-gray-800">Total Score</span>
+                      <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-bold">
+                        {results.parsedSupervisorFeedback.rawScore}/100
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Normalized to {results.parsedSupervisorFeedback.normalizedScore || results.supervisorScore}/9 for CEFR standards
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="bg-yellow-50 p-5 rounded-xl border border-yellow-200 mb-4">
@@ -572,7 +679,7 @@ const SpeakingAssessmentResults = ({ results: initialResults, onBack }) => {
             </button>
           </div>
         )}
-        </div>
+      </div>
 
       {/* AI Criteria breakdown */}
       <div className="mb-8">

@@ -2,6 +2,7 @@
 import mongoose from 'mongoose';
 import speakingAssessmentService from '../services/speakingAssessmentService.js';
 import speakingAssessmentTrackerService from '../services/speakingAssessmentTrackerService.js';
+import User from '../src/models/User.js';
 
 /**
  * Controller for speaking assessment endpoints
@@ -161,9 +162,37 @@ class SpeakingAssessmentController {
             const userIdentifier = userId || `anonymous_${Date.now()}`;
             console.log('Saving assessment with userId:', userIdentifier);
             
+            // Try to get user information to store with the assessment
+            let userName = null;
+            let userEmail = null;
+            
+            try {
+              if (mongoose.Types.ObjectId.isValid(userIdentifier)) {
+                const user = await User.findById(userIdentifier);
+                if (user) {
+                  userName = user.name;
+                  userEmail = user.email;
+                  console.log(`Found user by ID: ${userName}, ${userEmail}`);
+                }
+              }
+              
+              if (!userName && !isNaN(userIdentifier)) {
+                const user = await User.findOne({ userId: userIdentifier });
+                if (user) {
+                  userName = user.name;
+                  userEmail = user.email;
+                  console.log(`Found user by numeric ID: ${userName}, ${userEmail}`);
+                }
+              }
+            } catch (userLookupError) {
+              console.error('Error looking up user:', userLookupError);
+            }
+            
             // Create a complete assessment object with all required fields
             const assessmentData = {
               userId: userIdentifier,
+              userName: userName,  // Store user name directly
+              userEmail: userEmail, // Store user email directly
               language,
               level,
               taskId: parseInt(taskId),
@@ -172,11 +201,14 @@ class SpeakingAssessmentController {
               score: result.assessment.overallScore,
               feedback: JSON.stringify(result.assessment),
               transcribedText,
-              status: status || 'pending' // Use provided status or default to pending
+              status: status || 'pending', // Use provided status or default to pending
+              prompt: question // Store the prompt/question
             };
             
             console.log('Assessment data being saved:', {
               userId: assessmentData.userId,
+              userName: assessmentData.userName,
+              userEmail: assessmentData.userEmail,
               language: assessmentData.language,
               level: assessmentData.level,
               taskId: assessmentData.taskId,
@@ -257,9 +289,37 @@ class SpeakingAssessmentController {
             const userIdentifier = userId || `anonymous_${Date.now()}`;
             console.log('Saving assessment with userId:', userIdentifier);
             
+            // Try to get user information to store with the assessment
+            let userName = null;
+            let userEmail = null;
+            
+            try {
+              if (mongoose.Types.ObjectId.isValid(userIdentifier)) {
+                const user = await User.findById(userIdentifier);
+                if (user) {
+                  userName = user.name;
+                  userEmail = user.email;
+                  console.log(`Found user by ID: ${userName}, ${userEmail}`);
+                }
+              }
+              
+              if (!userName && !isNaN(userIdentifier)) {
+                const user = await User.findOne({ userId: userIdentifier });
+                if (user) {
+                  userName = user.name;
+                  userEmail = user.email;
+                  console.log(`Found user by numeric ID: ${userName}, ${userEmail}`);
+                }
+              }
+            } catch (userLookupError) {
+              console.error('Error looking up user:', userLookupError);
+            }
+            
             // Create a complete assessment object with all required fields
             const assessmentData = {
               userId: userIdentifier,
+              userName: userName,  // Store user name directly
+              userEmail: userEmail, // Store user email directly
               language,
               level,
               taskId: parseInt(taskId),
@@ -268,11 +328,14 @@ class SpeakingAssessmentController {
               score: result.assessment.overallScore,
               feedback: JSON.stringify(result.assessment),
               transcribedText: result.transcribedText,
-              status: status || 'pending' // Use provided status or default to pending
+              status: status || 'pending', // Use provided status or default to pending
+              prompt: question // Store the prompt/question
             };
             
             console.log('Assessment data being saved:', {
               userId: assessmentData.userId,
+              userName: assessmentData.userName,
+              userEmail: assessmentData.userEmail,
               language: assessmentData.language,
               level: assessmentData.level,
               taskId: assessmentData.taskId,
@@ -460,18 +523,103 @@ class SpeakingAssessmentController {
     try {
       const pendingAssessments = await speakingAssessmentTrackerService.getPendingAssessments();
       
+      console.log(`Found ${pendingAssessments.length} pending assessments`);
+      
       // Transform assessment data for client
-      const transformedAssessments = pendingAssessments.map(assessment => ({
-        id: assessment._id,
-        userId: assessment.userId,
-        language: assessment.language,
-        level: assessment.level,
-        taskId: assessment.taskId,
-        videoUrl: assessment.videoUrl,
-        score: assessment.score,
-        transcribedText: assessment.transcribedText,
-        createdAt: assessment.createdAt,
-        feedback: JSON.parse(assessment.feedback)
+      const transformedAssessments = await Promise.all(pendingAssessments.map(async assessment => {
+        // Try to find user information - first use stored values if available
+        let userInfo = { name: 'Unknown User' };
+        
+        if (assessment.userName) {
+          userInfo = {
+            name: assessment.userName,
+            email: assessment.userEmail || 'No email'
+          };
+          console.log(`Using stored user info: ${assessment.userName}`);
+        } else {
+          try {
+            if (assessment.userId) {
+              console.log(`Trying to find user info for userId: ${assessment.userId}, type: ${typeof assessment.userId}`);
+              
+              // Check if userId is a number (from User model) or string (MongoDB ObjectId)
+              if (!isNaN(assessment.userId)) {
+                // If it's a number, search by userId field
+                console.log(`Looking up user by numeric userId: ${assessment.userId}`);
+                const user = await User.findOne({ userId: assessment.userId });
+                if (user) {
+                  console.log(`Found user by userId: ${user.name}, ${user.email}`);
+                  userInfo = {
+                    name: user.name,
+                    email: user.email
+                  };
+                } else {
+                  console.log(`No user found with userId: ${assessment.userId}`);
+                }
+              } else {
+                // If it might be an ObjectId, try to find by _id
+                if (mongoose.Types.ObjectId.isValid(assessment.userId)) {
+                  console.log(`Looking up user by ObjectId: ${assessment.userId}`);
+                  const user = await User.findById(assessment.userId);
+                  if (user) {
+                    console.log(`Found user by ObjectId: ${user.name}, ${user.email}`);
+                    userInfo = {
+                      name: user.name,
+                      email: user.email
+                    };
+                  } else {
+                    console.log(`No user found with ObjectId: ${assessment.userId}`);
+                    
+                    // Try as a string user ID as fallback
+                    const userByStringId = await User.findOne({ userId: assessment.userId });
+                    if (userByStringId) {
+                      console.log(`Found user by string userId: ${userByStringId.name}, ${userByStringId.email}`);
+                      userInfo = {
+                        name: userByStringId.name,
+                        email: userByStringId.email
+                      };
+                    }
+                  }
+                } else {
+                  console.log(`UserId is not a valid ObjectId: ${assessment.userId}`);
+                  
+                  // Try one more approach - direct string comparison
+                  const userByExactMatch = await User.findOne({ 
+                    $or: [
+                      { userId: assessment.userId },
+                      { _id: assessment.userId },
+                      { email: assessment.userId }
+                    ]
+                  });
+                  
+                  if (userByExactMatch) {
+                    console.log(`Found user by alternative lookup: ${userByExactMatch.name}`);
+                    userInfo = {
+                      name: userByExactMatch.name,
+                      email: userByExactMatch.email
+                    };
+                  }
+                }
+              }
+            }
+          } catch (userError) {
+            console.warn(`Could not retrieve user info for userId ${assessment.userId}:`, userError.message);
+          }
+        }
+        
+        return {
+          id: assessment._id,
+          userId: assessment.userId,
+          userInfo: userInfo,
+          language: assessment.language,
+          level: assessment.level,
+          taskId: assessment.taskId,
+          videoUrl: assessment.videoUrl,
+          score: assessment.score,
+          transcribedText: assessment.transcribedText,
+          createdAt: assessment.createdAt,
+          prompt: assessment.prompt || "Speaking assessment task",
+          feedback: JSON.parse(assessment.feedback)
+        };
       }));
       
       return res.status(200).json({
@@ -496,19 +644,46 @@ class SpeakingAssessmentController {
   async submitSupervisorEvaluation(req, res) {
     try {
       const { assessmentId } = req.params;
-      const { supervisorId, score, feedback } = req.body;
+      // Log the entire request body for debugging
+      console.log('Request body:', req.body);
+      
+      const { supervisorId, score, feedback, criteria } = req.body;
       
       console.log('submitSupervisorEvaluation called with:', {
         assessmentId,
         supervisorId,
-        score,
-        feedback: feedback?.substring(0, 50) + '...' // Truncate for logging
+        score: score,
+        feedback: feedback?.substring(0, 50) + (feedback?.length > 50 ? '...' : ''),
+        hasCriteria: !!criteria,
+        criteriaLength: criteria?.length
       });
       
-      if (!assessmentId || !supervisorId || !score || !feedback) {
+      // Check if required fields are present
+      if (!assessmentId) {
         return res.status(400).json({
           success: false,
-          message: 'AssessmentId, supervisorId, score, and feedback are required'
+          message: 'Assessment ID is required'
+        });
+      }
+      
+      if (!supervisorId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Supervisor ID is required'
+        });
+      }
+      
+      if (score === undefined || score === null) {
+        return res.status(400).json({
+          success: false,
+          message: 'Score is required'
+        });
+      }
+      
+      if (!feedback) {
+        return res.status(400).json({
+          success: false,
+          message: 'Feedback is required'
         });
       }
       
@@ -521,8 +696,27 @@ class SpeakingAssessmentController {
         });
       }
       
+      // Convert score to number if it's a string
+      const scoreValue = typeof score === 'string' ? parseInt(score) : score;
+      
+      console.log('Calling service with:', {
+        assessmentId,
+        supervisorId,
+        score: scoreValue,
+        feedbackLength: feedback?.length
+      });
+      
+      // Save the criteria data as part of the feedback
+      const feedbackWithCriteria = {
+        overallFeedback: feedback,
+        criteria: criteria || []
+      };
+      
+      // Convert to JSON string
+      const feedbackJson = JSON.stringify(feedbackWithCriteria);
+      
       const updatedAssessment = await speakingAssessmentTrackerService.submitSupervisorEvaluation(
-        assessmentId, supervisorId, score, feedback
+        assessmentId, supervisorId, scoreValue, feedbackJson
       );
       
       return res.status(200).json({

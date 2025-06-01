@@ -9,7 +9,7 @@ const assessmentResultSchema = new mongoose.Schema({
   assessmentType: {
     type: String,
     required: true,
-    enum: ['leadership', 'puzzle-game', 'fast-questions', 'codeforces', 'adaptability'],
+    enum: ['leadership', 'puzzle-game', 'fast-questions', 'codeforces', 'adaptability', 'communication', 'writing', 'speaking', 'reading', 'listening'],
   },
   completedAt: {
     type: Date,

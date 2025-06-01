@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import CEFRService from '../../services/cefr.service';
 import api from '../../services/api';
 import cloudinaryService from '../../services/cloudinary.service';
+import AssessmentService from '../../services/assessment.service';
 
 // Reusable function for creating consistent status messages
 const createStatusMessage = (type, message, icon = null) => {
@@ -154,68 +155,131 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
         setLoading(true);
         setError(createStatusMessage('info', 'Checking assessment status...'));
         
-        // Import assessment service
-        const assessmentService = await import('../../services/assessment.service');
+        // Check if the user has already completed this assessment
+        const response = await AssessmentService.checkSpeakingAssessment(
+          userId, language, level, 1
+        );
         
-        // First, check if the user can take this assessment (cooldown period)
-        try {
-          const availabilityResponse = await assessmentService.default.checkSpeakingAssessmentAvailability(
-            language, level, 1
-          );
+        console.log("Assessment check response:", response);
+        
+        if (response.success && response.exists) {
+          console.log("Found existing assessment:", response);
           
-          if (availabilityResponse.success && !availabilityResponse.available) {
-            // User can't take the assessment yet
-            if (availabilityResponse.pendingReview) {
-              setAssessmentStatus('pending');
-              setError(createStatusMessage('info', 
-                <span>
-                  <span className="font-medium">Assessment pending review</span>
-                  <p className="text-sm mt-1">
-                    You have already submitted this assessment and it's waiting for supervisor review.
-                  </p>
-                </span>
-              ));
-            } else if (availabilityResponse.nextAvailableDate) {
-              setCanRetake(false);
-              setRetakeAvailableDate(new Date(availabilityResponse.nextAvailableDate));
+          // Process the assessment data
+          let assessmentData = response.assessment;
+          console.log("Raw assessment data:", assessmentData);
+          
+          // Parse supervisor feedback if it's a JSON string
+          if (assessmentData.supervisorFeedback && typeof assessmentData.supervisorFeedback === 'string') {
+            try {
+              const parsedFeedback = JSON.parse(assessmentData.supervisorFeedback);
+              console.log('Parsed supervisor feedback:', parsedFeedback);
+              
+              // Update the assessment data with parsed feedback
+              assessmentData = {
+                ...assessmentData,
+                parsedSupervisorFeedback: parsedFeedback,
+                supervisorFeedbackText: parsedFeedback.overallFeedback || assessmentData.supervisorFeedback
+              };
+              
+              // Extract criteria if available
+              if (parsedFeedback.criteria && Array.isArray(parsedFeedback.criteria)) {
+                assessmentData.supervisorCriteria = parsedFeedback.criteria;
+                console.log('Found supervisor criteria:', parsedFeedback.criteria.length);
+              }
+              
+              // Extract raw score and normalized score if available
+              if (parsedFeedback.rawScore !== undefined) {
+                assessmentData.rawScore = parsedFeedback.rawScore;
+              }
+              
+              if (parsedFeedback.normalizedScore !== undefined) {
+                assessmentData.normalizedScore = parsedFeedback.normalizedScore;
+              }
+            } catch (error) {
+              console.error('Error parsing supervisor feedback:', error);
+            }
+          }
+          
+          // Log the supervisor score for debugging
+          console.log("Supervisor score:", assessmentData.supervisorScore);
+          
+          // Store the processed assessment
+          setExistingAssessment(assessmentData);
+          setAssessmentStatus(response.status || assessmentData.status);
+          
+          // Check if user can retake the assessment (7-day cooldown)
+          if (response.canRetake === false) {
+            setCanRetake(false);
+            
+            if (response.nextAvailableDate) {
+              setRetakeAvailableDate(new Date(response.nextAvailableDate));
+              
+              // Calculate days remaining in a user-friendly way
+              const daysRemaining = response.daysRemaining || 
+                Math.ceil((new Date(response.nextAvailableDate) - new Date()) / (24 * 60 * 60 * 1000));
+              
               setError(createStatusMessage('warning', 
                 <span>
                   <span className="font-medium">Assessment cooldown period</span>
                   <p className="text-sm mt-1">
-                    You can take this assessment again after {new Date(availabilityResponse.nextAvailableDate).toLocaleDateString()}.
+                    You have already taken this assessment. You can retake it in {daysRemaining} day{daysRemaining !== 1 ? 's' : ''}.
+                  </p>
+                  <p className="text-sm mt-1">
+                    Available from: {new Date(response.nextAvailableDate).toLocaleDateString()}
                   </p>
                 </span>
               ));
+              
+              setLoading(false);
+              return;
             }
           }
-        } catch (availabilityError) {
-          console.error("Error checking assessment availability:", availabilityError);
-          // Continue with the check assessment flow even if availability check fails
-        }
-        
-        // Check if the user has already completed this assessment
-        const response = await assessmentService.default.checkSpeakingAssessment(
-          userId, language, level, 1
-        );
-        
-        if (response.success && response.hasCompleted) {
-          console.log("Found existing assessment:", response);
-          setExistingAssessment(response.assessment);
-          setAssessmentStatus(response.status || response.assessment?.status);
           
           // If the assessment is already completed and evaluated, show the results
           if (response.status === 'evaluated' || response.assessment?.status === 'evaluated') {
-            // Clear any error messages
-            setError(null);
-            
-            // Pass the assessment to the complete handler to show results
-            onComplete({
-              ...response.assessment,
-              type: 'speaking',
-              videoUrl: response.videoUrl,
-              transcribedText: response.transcribedText,
-              isExisting: true
-            });
+            if (response.canRetake) {
+              setError(createStatusMessage('info', 
+                <span>
+                  <span className="font-medium">Previous assessment available</span>
+                  <p className="text-sm mt-1">
+                    You can view your previous results or take the assessment again.
+                  </p>
+                  <div className="mt-2">
+                    <button 
+                      onClick={() => onComplete({
+                        ...response.assessment,
+                        type: 'speaking',
+                        videoUrl: response.videoUrl,
+                        transcribedText: response.transcribedText,
+                        isExisting: true
+                      })}
+                      className="px-3 py-1 bg-blue-600 text-white rounded-md text-sm mr-2"
+                    >
+                      View Results
+                    </button>
+                    <button 
+                      onClick={() => setError(null)}
+                      className="px-3 py-1 bg-green-600 text-white rounded-md text-sm"
+                    >
+                      Take Again
+                    </button>
+                  </div>
+                </span>
+              ));
+            } else {
+              // Process the assessment data for display
+              const assessmentForDisplay = {
+                ...response.assessment,
+                type: 'speaking',
+                videoUrl: response.videoUrl || response.assessment.videoUrl,
+                transcribedText: response.transcribedText || response.assessment.transcribedText,
+                isExisting: true
+              };
+              
+              // Pass the assessment to the complete handler to show results
+              onComplete(assessmentForDisplay);
+            }
           } else if (response.status === 'pending' || response.assessment?.status === 'pending') {
             // Show pending message
             setError(createStatusMessage('info', 
@@ -330,6 +394,7 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
   useEffect(() => {
     if (stream && videoRef.current) {
       videoRef.current.srcObject = stream;
+      videoRef.current.muted = true; // Ensure video is muted to prevent echo
       videoRef.current.onloadedmetadata = () => {
         videoRef.current.play().catch(e => {
           console.error("Error playing video:", e);
@@ -585,11 +650,14 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
         videoOnlyStream.getTracks().forEach(track => track.stop());
         
         // Now try with both video and audio with specific constraints
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
+        const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            // Add these to prevent echo
+            echoCancellationType: 'system',
+            suppressLocalAudioPlayback: true
           },
           video: {
             width: { ideal: 640 }, // Reduced from 1280 for better compatibility
@@ -631,9 +699,9 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
           track.onunmute = () => console.log(`Track ${track.kind} unmuted`);
         });
         
-      setStream(mediaStream);
-      setAudioInitialized(true);
-      setAudioInitializing(false);
+        setStream(mediaStream);
+        setAudioInitialized(true);
+        setAudioInitializing(false);
         
         // Display success message
         setError(
@@ -651,14 +719,18 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
           setError(null);
         }, 3000);
         
-      return mediaStream;
-    } catch (err) {
+        return mediaStream;
+      } catch (err) {
         console.error("Error with optimized media request, trying fallback approach:", err);
         
         // Fallback to a simpler approach
         try {
           const fallbackStream = await navigator.mediaDevices.getUserMedia({ 
-            audio: true, 
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }, 
             video: true 
           });
           
@@ -763,9 +835,9 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
       setRecordedChunks([]);
       
       // Make sure we're not in preparation mode
-    if (isPreparationMode) {
-      setIsPreparationMode(false);
-      setPreparationTimeLeft(null);
+      if (isPreparationMode) {
+        setIsPreparationMode(false);
+        setPreparationTimeLeft(null);
       }
       
       // Ensure we have a clean stream
@@ -777,7 +849,11 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
       // Get fresh camera and microphone access
       console.log("Requesting fresh camera and microphone access");
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
         video: {
           width: { ideal: 640 },
           height: { ideal: 480 },
@@ -788,6 +864,7 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
       // Set the stream to the video element
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        videoRef.current.muted = true; // Ensure video is muted to prevent echo
         await videoRef.current.play().catch(e => console.warn("Could not auto-play video:", e));
       }
       
@@ -904,12 +981,25 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
       mediaRecorder.stop();
       
       // Request final data if possible
-          if (typeof mediaRecorder.requestData === 'function') {
+      if (typeof mediaRecorder.requestData === 'function') {
         try {
-            mediaRecorder.requestData();
+          mediaRecorder.requestData();
         } catch (e) {
           console.warn("Error requesting final data:", e);
         }
+      }
+      
+      // Stop all tracks to release microphone and camera
+      if (stream) {
+        console.log("Stopping all media tracks after recording");
+        stream.getTracks().forEach(track => {
+          console.log(`Stopping track: ${track.kind}, ID: ${track.id}`);
+          track.stop();
+        });
+        
+        // Clear the stream reference
+        setStream(null);
+        setMediaRecorder(null);
       }
       
       console.log("Recording stopped successfully");
@@ -1023,6 +1113,14 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
     setIsPreparationMode(false);
     setPreparationTimeLeft(null);
     setRecordingTimeLeft(null);
+    setIsRecording(false);
+    setMediaRecorder(null);
+    setAudioInitialized(false);
+    
+    // Clear any blob URLs to prevent memory leaks
+    if (recordings[currentTask]) {
+      URL.revokeObjectURL(recordings[currentTask]);
+    }
   };
 
   // Modified handleSubmit function to properly save to database
@@ -1037,6 +1135,12 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
         setError(createStatusMessage('error', "Please complete all recording tasks before submitting."));
         setSubmitting(false);
         return;
+      }
+      
+      // Make sure to release any remaining media resources
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        setStream(null);
       }
       
       // Check if user has a valid token
@@ -1122,8 +1226,7 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
         };
         
         // Submit assessment
-        const assessmentService = await import('../../services/assessment.service');
-        const response = await assessmentService.default.submitAssessment({
+        const response = await AssessmentService.submitAssessment({
           type: 'speaking',
           data: taskData
         });
@@ -1257,6 +1360,39 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
 
   // Show cooldown message when the user can't retake the assessment yet
   if (!canRetake && retakeAvailableDate) {
+    // Parse supervisor feedback if it's a JSON string
+    let parsedSupervisorFeedback = null;
+    let supervisorFeedbackText = existingAssessment?.supervisorFeedback;
+    let supervisorScore = existingAssessment?.supervisorScore;
+    let supervisorCriteria = [];
+    
+    // Try to parse supervisor feedback if it exists and is a string
+    if (existingAssessment?.supervisorFeedback && typeof existingAssessment.supervisorFeedback === 'string') {
+      try {
+        parsedSupervisorFeedback = JSON.parse(existingAssessment.supervisorFeedback);
+        supervisorFeedbackText = parsedSupervisorFeedback.overallFeedback || existingAssessment.supervisorFeedback;
+        
+        // Extract criteria if available
+        if (parsedSupervisorFeedback.criteria && Array.isArray(parsedSupervisorFeedback.criteria)) {
+          supervisorCriteria = parsedSupervisorFeedback.criteria;
+        }
+        
+        console.log('Parsed supervisor feedback:', parsedSupervisorFeedback);
+      } catch (error) {
+        console.error('Error parsing supervisor feedback:', error);
+      }
+    }
+    
+    // Log the existing assessment data for debugging
+    console.log('Existing assessment data:', existingAssessment);
+    
+    // Calculate the score to display - use supervisorScore if available, otherwise use the regular score
+    const scoreToDisplay = supervisorScore !== undefined && supervisorScore !== null ? 
+      (supervisorScore > 10 ? supervisorScore : Math.round(supervisorScore * 11.1)) : 
+      (existingAssessment?.score || 0);
+    
+    console.log('Score to display:', scoreToDisplay, 'Supervisor score:', supervisorScore);
+    
     return (
       <div className="max-w-3xl mx-auto p-6 bg-white rounded-lg shadow-lg">
         <div className="text-center py-8">
@@ -1272,18 +1408,71 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
           </p>
           
           {existingAssessment && (
-            <div className="border border-gray-200 rounded-lg p-4 mb-6 max-w-md mx-auto text-left">
+            <div className="border border-gray-200 rounded-lg p-4 mb-6 mx-auto text-left">
               <div className="flex justify-between items-center mb-2">
                 <h3 className="text-lg font-medium">Your Previous Results</h3>
-                <div className="text-xl font-bold text-[#592538]">{existingAssessment.supervisorScore || existingAssessment.score || 0}%</div>
+                <div className="text-xl font-bold text-[#592538]">{scoreToDisplay}%</div>
               </div>
               <p className="text-sm text-gray-500 mb-2">
                 {existingAssessment.status === 'evaluated' ? 'Evaluated by supervisor' : 'Pending supervisor review'}
               </p>
-              {existingAssessment.supervisorFeedback && (
-                <div className="mt-2 text-sm">
-                  <div className="font-medium">Supervisor Feedback:</div>
-                  <p className="italic text-gray-600">{existingAssessment.supervisorFeedback}</p>
+              
+              {/* Overall Supervisor Feedback */}
+              {supervisorFeedbackText && (
+                <div className="mt-4 mb-4">
+                  <div className="font-medium text-[#592538]">Supervisor Feedback:</div>
+                  <p className="italic text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100 mt-1">
+                    {supervisorFeedbackText}
+                  </p>
+                </div>
+              )}
+              
+              {/* Detailed Criteria Feedback */}
+              {supervisorCriteria && supervisorCriteria.length > 0 && (
+                <div className="mt-4">
+                  <div className="font-medium text-[#592538] mb-2">Detailed Criteria Feedback:</div>
+                  <div className="space-y-3">
+                    {supervisorCriteria.map((criterion, index) => (
+                      <div key={index} className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-medium text-gray-700">{criterion.name}</span>
+                          <span className="px-2 py-1 bg-[#592538]/10 text-[#592538] rounded-full text-xs font-bold">
+                            {criterion.score}/{criterion.maxScore || 20}
+                          </span>
+                        </div>
+                        
+                        {/* Score Progress Bar */}
+                        <div className="w-full bg-gray-200 rounded-full h-1.5 mb-2">
+                          <div 
+                            className="h-1.5 rounded-full bg-[#592538]" 
+                            style={{ 
+                              width: `${(criterion.score / (criterion.maxScore || 20)) * 100}%`, 
+                              transition: 'width 1s ease-out' 
+                            }}
+                          ></div>
+                        </div>
+                        
+                        {criterion.feedback && (
+                          <p className="text-sm text-gray-600 mt-1">{criterion.feedback}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Raw score display if available */}
+              {parsedSupervisorFeedback?.rawScore && (
+                <div className="mt-4 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium text-gray-700">Total Score</span>
+                    <span className="px-2 py-1 bg-[#592538]/10 text-[#592538] rounded-full text-xs font-bold">
+                      {parsedSupervisorFeedback.rawScore}/100
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Normalized to {parsedSupervisorFeedback.normalizedScore || supervisorScore}/9 for CEFR standards
+                  </div>
                 </div>
               )}
             </div>
@@ -1457,7 +1646,7 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
                       <video 
                         ref={videoRef}
                         className="w-full h-full object-cover"
-                        muted={true} // Mute to prevent feedback
+                        muted={true} // Always mute to prevent echo
                         autoPlay
                         playsInline
                       />
@@ -1519,7 +1708,7 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
                     </div>
                     
                     {/* Audio element for recording handling - hidden */}
-                    <audio ref={audioRef} className="hidden" />
+                    <audio ref={audioRef} className="hidden" muted={true} />
                     
                     {/* Bottom gradient with info when recording or recorded */}
                     {(isRecording || recordings[currentTask]) && (
@@ -1554,15 +1743,18 @@ const SpeakingAssessment = ({ onComplete, level, language, onBack }) => {
                       {language === 'english' ? 'STOP RECORDING' : 'ARRÊTER L\'ENREGISTREMENT'}
               </button>
                   ) : (
-                    audioInitialized && !recordings[currentTask] && (
+                    !recordings[currentTask] && (
                       <button
-                        onClick={startRecording}
+                        onClick={audioInitialized ? startRecording : startAudio}
                         className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white text-lg font-semibold rounded-xl flex items-center shadow-lg transition-all"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                         </svg>
-                        {language === 'english' ? 'START RECORDING' : 'COMMENCER L\'ENREGISTREMENT'}
+                        {audioInitialized ? 
+                          (language === 'english' ? 'START RECORDING' : 'COMMENCER L\'ENREGISTREMENT') :
+                          (language === 'english' ? 'ENABLE CAMERA & MIC' : 'ACTIVER CAMÉRA & MICRO')
+                        }
                       </button>
                     )
                   )}

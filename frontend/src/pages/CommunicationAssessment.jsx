@@ -158,6 +158,10 @@ const CommunicationAssessment = () => {
     setCurrentModule(moduleId);
   };
 
+  const handleLevelSelect = (levelId) => {
+    setSelectedLevel(levelId);
+  };
+
   const handleAssessmentComplete = (assessmentResults) => {
     // Ensure we have the type property set for proper display
     if (assessmentResults && !assessmentResults.type && currentModule) {
@@ -204,12 +208,6 @@ const CommunicationAssessment = () => {
     }
   };
 
-  // Custom function to handle completion and navigate to home
-  const handleResultsComplete = () => {
-    // Navigate to dashboard instead of home page
-    navigate('/dashboard');
-  };
-
   const renderContent = () => {
     if (results) {
       // For speaking assessments, use the SimpleSpeakingResults component
@@ -236,249 +234,136 @@ const CommunicationAssessment = () => {
         );
       }
       
-      // For other types of assessments, show the standard results view
+      // For other types of assessments, show the standard results view without duplicate header
       return (
-        <div className="max-w-3xl mx-auto p-6 bg-white rounded-xl shadow-lg">
-          <div className="mb-8">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-[#592538]">
-                {results.type.charAt(0).toUpperCase() + results.type.slice(1)} Assessment Results
-              </h2>
-              <button 
-                onClick={handleBack}
-                className="px-4 py-2 text-sm font-medium text-[#592538] rounded-lg border border-[#592538] hover:bg-[#592538] hover:text-white transition-colors"
-              >
-                Back to Assessments
-              </button>
-            </div>
-
-            <div className="bg-gradient-to-r from-gray-50 to-gray-100 p-6 rounded-xl mb-6 shadow-sm">
-              <div className="flex flex-col md:flex-row items-center justify-between">
-                <div className="flex items-center mb-4 md:mb-0">
-                  <div>
-                    <h3 className="text-xl font-semibold text-gray-800">
-                      English - {levels.find(l => l.id === selectedLevel)?.name}
-                    </h3>
-                    <p className="text-gray-600">
-                      {results.type.charAt(0).toUpperCase() + results.type.slice(1)} Assessment
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="text-center bg-white rounded-full p-4 shadow-sm">
-                  <div className="text-4xl font-bold text-[#592538]">{Math.round(results.score)}%</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6 shadow-sm">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Assessment Results</h3>
-              
-              {/* Supervisor feedback section for speaking assessments */}
-              {results.status === 'evaluated' && results.supervisorFeedback ? (
-                <div className="mb-6 bg-green-50 p-5 rounded-xl border border-green-200">
-                  <div className="flex items-center mb-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                    </svg>
-                    <h4 className="text-lg font-semibold text-green-800">Supervisor Evaluation</h4>
-                  </div>
-                  <div className="flex items-center mb-4">
-                    <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center mr-4 shadow-sm">
-                      <div className="text-2xl font-bold text-green-700">
-                        {results.supervisorScore}/9
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-green-800">{results.supervisorFeedback}</p>
-                      <div className="text-sm text-gray-500 mt-1">
-                        {results.evaluatedAt ? new Date(results.evaluatedAt).toLocaleDateString() : 'Recently evaluated'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : results.status === 'pending' ? (
-                <div className="mb-6 bg-yellow-50 p-5 rounded-xl border border-yellow-200">
-                  <div className="flex items-center mb-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <h4 className="text-lg font-semibold text-yellow-800">Awaiting Expert Evaluation</h4>
-                  </div>
-                  <p className="text-yellow-800 mb-2">
-                    Your speaking assessment has been submitted successfully and is awaiting review by a language expert.
-                  </p>
-                  <p className="text-xs text-yellow-600">
-                    You can return to this page later to check if your assessment has been evaluated.
-                    {results.assessmentId && <span className="block mt-1">Assessment ID: {results.assessmentId}</span>}
-                  </p>
-                </div>
-              ) : null}
-              
-              {/* Only show feedback for non-speaking assessments */}
-              {results.type !== 'speaking' && results.feedback && (
-                <div className="mt-4">
-                  <h4 className="font-medium text-gray-700 mb-2">
-                    {results.status === 'evaluated' ? 'Assessment Feedback' : 'Preliminary Feedback'}
-                  </h4>
-                  <p className="text-gray-600 bg-gray-50 p-4 rounded-lg">{results.feedback}</p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex flex-col items-center mt-8">
-              {/* Refresh button for checking updates - only show for pending assessments */}
-              {results.status === 'pending' && results.assessmentId && (
-                <button
-                  onClick={() => {
-                    // Show loading indicator
-                    const tempResults = {...results, isRefreshing: true};
-                    setResults(tempResults);
-                    
-                    // Import service dynamically
-                    import('../services/assessment.service').then(module => {
-                      const AssessmentService = module.default;
-                      AssessmentService.getSpeakingAssessment(results.assessmentId)
-                        .then(response => {
-                          if (response.success && response.assessment) {
-                            console.log('Refreshed assessment data:', response.assessment);
-                            // Create a new object that combines the current results with the new assessment data
-                            const updatedResults = {
-                              ...results,
-                              ...response.assessment,
-                              supervisorFeedback: response.assessment.supervisorFeedback,
-                              supervisorScore: response.assessment.supervisorScore,
-                              status: response.assessment.status,
-                              isRefreshing: false
-                            };
-                            setResults(updatedResults);
-                          } else {
-                            // Reset refreshing state if failed
-                            const resetResults = {...results, isRefreshing: false};
-                            setResults(resetResults);
-                          }
-                        })
-                        .catch(error => {
-                          console.error('Failed to refresh assessment:', error);
-                          // Reset refreshing state if failed
-                          const resetResults = {...results, isRefreshing: false};
-                          setResults(resetResults);
-                        });
-                    });
-                  }}
-                  className="px-6 py-2.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors mb-4 flex items-center"
-                  disabled={results.isRefreshing}
-                >
-                  {results.isRefreshing ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700 mr-2"></div>
-                      Checking for updates...
-                    </>
-                  ) : (
-                    <>
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      Check for Supervisor Evaluation
-                    </>
-                  )}
-                </button>
-              )}
-              
-              <button
-                onClick={handleResultsComplete}
-                className="px-8 py-3 bg-gradient-to-r from-[#592538] to-[#6d2c44] text-white rounded-lg hover:shadow-lg transition-all duration-300 flex items-center"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-                Return to Dashboard
-              </button>
-            </div>
-          </div>
+        <div className="max-w-3xl mx-auto">
+          <LanguageResults 
+            results={results}
+            level={selectedLevel}
+            language={selectedLanguage}
+            onBack={handleBack}
+          />
         </div>
       );
     }
 
     if (currentModule) {
       const ModuleComponent = modules.find(m => m.id === currentModule).component;
+      // Make sure level and language are defined
+      const safeLevel = selectedLevel || 'b1';
+      const safeLanguage = selectedLanguage || 'english';
+      
       return (
-        <ModuleComponent 
-          onComplete={handleAssessmentComplete} 
-          level={selectedLevel}
-          language={selectedLanguage}
-          onBack={handleBack}
-        />
+        <div className="max-w-5xl mx-auto">
+          <ModuleComponent 
+            onComplete={handleAssessmentComplete} 
+            level={safeLevel}
+            language={safeLanguage}
+            onBack={handleBack}
+          />
+        </div>
       );
     }
 
     return (
-      <div className="max-w-6xl mx-auto px-4">
-        <div className="flex justify-between items-center mb-8">
-          <h2 className="text-2xl font-bold text-[#592538]">
-            Choose Your Communication Skills Level
-          </h2>
+      <div className="max-w-5xl mx-auto space-y-8">
+        <div className="flex justify-between items-center">
           <button 
             onClick={handleBack}
-            className="px-5 py-2.5 text-sm font-medium text-white bg-[#592538] rounded-lg hover:bg-[#6d2c44] transition-colors shadow-md"
+            className="px-4 py-2 text-sm font-medium text-[#592538] rounded-lg border border-[#592538] hover:bg-[#592538] hover:text-white transition-colors"
           >
             Back
           </button>
         </div>
         
-        <div className="mb-12">
-          <div className="flex items-center mb-6">
-            <div className="h-10 w-1.5 bg-[#592538] rounded mr-3"></div>
-            <h3 className="text-xl font-medium text-gray-700">CEFR Levels</h3>
+        <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+          <div className="bg-gradient-to-r from-[#592538] to-[#7b3049] p-8 text-white">
+            <h2 className="text-3xl font-bold mb-4">
+              Communication Skills Assessment
+            </h2>
+            <p className="text-white/90 max-w-3xl">
+              Assess your language communication skills with these modules. Each module focuses on a different aspect of language proficiency.
+            </p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {levels.map(level => (
-              <div
-                key={level.id}
-                onClick={() => setSelectedLevel(level.id)}
-                className={`p-5 rounded-xl border cursor-pointer shadow-sm transition-all duration-300 ${
-                  selectedLevel === level.id
-                    ? 'border-[#592538] ring-2 ring-[#592538] ring-opacity-25 transform scale-[1.02] shadow-md'
-                    : `border-gray-200 hover:shadow-md bg-gradient-to-br ${level.color}`
-                }`}
-              >
-                <div className="flex items-center mb-3">
-                  {selectedLevel === level.id && (
-                    <span className="flex items-center justify-center w-6 h-6 bg-[#592538] text-white rounded-full mr-2">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </span>
-                  )}
-                  <h3 className="text-xl font-bold text-gray-800">{level.name}</h3>
+          
+          <div className="p-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {modules.map((module) => (
+                <div 
+                  key={module.id}
+                  onClick={() => handleModuleSelect(module.id)}
+                  className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all hover:border-[#592538]/30 cursor-pointer"
+                >
+                  <div className="flex items-start">
+                    <div className="flex-shrink-0 bg-[#592538]/10 p-3 rounded-lg mr-4">
+                      {module.icon}
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-semibold text-[#592538] mb-2">
+                        {module.title}
+                      </h3>
+                      <p className="text-gray-600 mb-4">
+                        {module.description}
+                      </p>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-500">
+                          Selected level: <span className="font-medium">{levels.find(l => l.id === selectedLevel)?.name || 'B1 - Intermediate'}</span>
+                        </span>
+                        <button className="px-4 py-2 bg-[#592538] text-white rounded-lg hover:bg-[#6d2c44] transition-colors text-sm font-medium flex items-center">
+                          Start Assessment
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <p className={`${selectedLevel === level.id ? 'text-gray-700' : 'text-gray-600'}`}>{level.description}</p>
+              ))}
+            </div>
+            
+            <div className="mt-12">
+              <div className="flex items-center mb-6">
+                <div className="w-10 h-1 bg-[#592538] rounded-full mr-3"></div>
+                <h3 className="text-xl font-bold text-gray-800">CEFR Levels</h3>
+                <p className="ml-4 text-sm text-gray-600">Select your proficiency level:</p>
               </div>
-            ))}
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {levels.map((level) => (
+                  <div 
+                    key={level.id} 
+                    onClick={() => handleLevelSelect(level.id)}
+                    className={`border rounded-lg p-4 bg-gradient-to-br ${level.color} hover:shadow-md transition-shadow cursor-pointer ${selectedLevel === level.id ? 'ring-2 ring-[#592538] ring-offset-2' : ''}`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <h4 className="font-semibold text-gray-800">{level.name}</h4>
+                      {selectedLevel === level.id && (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-[#592538]" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">{level.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
         
-        <div>
-          <div className="flex items-center mb-6">
-            <div className="h-10 w-1.5 bg-[#592538] rounded mr-3"></div>
-            <h3 className="text-xl font-medium text-gray-700">Communication Skills Areas</h3>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {modules.map((module) => (
-              <div
-                key={module.id}
-                className="bg-white rounded-xl shadow-md p-6 cursor-pointer hover:shadow-xl transition-all duration-300 border border-gray-100 hover:border-[#592538] group"
-                onClick={() => handleModuleSelect(module.id)}
-              >
-                <div className="flex flex-col items-center text-center">
-                  <div className="text-[#592538] group-hover:text-[#6d2c44] transition-colors mb-4">
-                    {module.icon}
-                  </div>
-                  <h2 className="text-xl font-bold mb-3 text-[#592538] group-hover:text-[#6d2c44] transition-colors">{module.title}</h2>
-                  <p className="text-gray-600">{module.description}</p>
-                </div>
-              </div>
-            ))}
+        <div className="bg-white rounded-xl shadow-lg p-8 mt-8">
+          <div className="text-center mb-6">
+            <div className="inline-block p-1.5 rounded-lg bg-[#592538] mb-4">
+              <span className="text-white font-medium px-3 py-1">CEFR Standards</span>
+            </div>
+            <h2 className="text-2xl font-bold text-[#592538] mb-4">
+              International Language Standards
+            </h2>
+            <p className="text-gray-600 max-w-3xl mx-auto">
+              Assess your English language skills based on the Common European Framework of Reference for Languages (CEFR).
+              This standardized framework is recognized worldwide for measuring language proficiency.
+            </p>
           </div>
         </div>
       </div>
@@ -486,21 +371,8 @@ const CommunicationAssessment = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 py-10">
-      <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-12">
-          <div className="inline-block p-1.5 rounded-lg bg-[#592538] mb-4">
-            <span className="text-white font-medium px-3 py-1">CEFR Standards</span>
-          </div>
-          <h1 className="text-4xl font-bold text-center text-[#592538] mb-4">
-            Communication Skills Test
-          </h1>
-          <p className="text-gray-600 max-w-2xl mx-auto mb-8">
-            Assess your English language skills based on the Common European Framework of Reference for Languages (CEFR).
-            Select a level from A1 to C1 and skill area to begin your assessment.
-          </p>
-          <div className="h-1 w-24 bg-gradient-to-r from-[#592538] to-[#6d2c44] mx-auto rounded-full"></div>
-        </div>
+    <div className="min-h-screen bg-gray-50 py-12">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         {renderContent()}
       </div>
     </div>

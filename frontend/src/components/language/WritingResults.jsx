@@ -14,8 +14,8 @@ const WritingResults = ({ results, onBack }) => {
   // If we have criteria scores, sum them up
   if (results?.tasks && results.tasks.length > 0 && results.tasks[0]?.aiEvaluation?.criteria) {
     const criteria = results.tasks[0].aiEvaluation.criteria;
-    // Sum up all criteria scores (multiply by 2 since they're stored as out of 10)
-    scorePercentage = criteria.reduce((sum, criterion) => sum + (criterion.score * 2), 0);
+    // Use the actual score without multiplying
+    scorePercentage = criteria.reduce((sum, criterion) => sum + criterion.score, 0);
   } else {
     // Fallback to the provided score if criteria not available
     scorePercentage = Math.round(results?.score || 0);
@@ -92,7 +92,7 @@ const WritingResults = ({ results, onBack }) => {
                     <div key={index} className="bg-white p-3 rounded border border-blue-100">
                       <div className="flex justify-between items-center">
                         <span className="text-sm font-medium">{criterion.name}</span>
-                        <span className="text-sm font-medium text-[#592538]">{criterion.score * 2}/20</span>
+                        <span className="text-sm font-medium text-[#592538]">{criterion.score}/20</span>
                       </div>
                       <p className="text-xs text-gray-600 mt-1">{criterion.feedback}</p>
                     </div>

@@ -211,6 +211,26 @@ Please provide:
         console.log("Calculated overall score:", assessment.overallScore);
       }
       
+      // Ensure score consistency - this is the key change to fix the score discrepancy
+      // Store the raw score calculation for reference
+      assessment.rawScoreCalculation = assessment.criteria.reduce((acc, criterion) => acc + criterion.score, 0);
+      
+      // Recalculate overall score based on criteria scores to ensure consistency
+      // Each criterion is out of 10, so total is out of 50, convert to percentage
+      const calculatedScore = Math.round((assessment.rawScoreCalculation / 50) * 100);
+      
+      // Always use the calculated score for consistency
+      assessment.overallScore = calculatedScore;
+      console.log("Using calculated score for consistency:", assessment.overallScore);
+      
+      // Calculate original score for debugging
+      if (overallMatch) {
+        const originalScore = parseInt(overallMatch[1]);
+        if (originalScore !== calculatedScore) {
+          console.log(`Score discrepancy detected: AI gave ${originalScore}%, calculation gives ${calculatedScore}%`);
+        }
+      }
+      
       // Extract overall feedback
       const overallFeedbackMatch = aiResponse.match(/overall feedback:?\s*([\s\S]+?)(?=recommendations|$)/i);
       if (overallFeedbackMatch) {
@@ -326,6 +346,318 @@ Please provide:
       });
       throw new Error('Failed to parse AI assessment response');
     }
+  }
+
+  /**
+   * Generate a new writing prompt based on the level and language
+   * @param {string} level - CEFR level (a1, a2, b1, b2, c1, c2)
+   * @param {string} language - Language (english, french)
+   * @returns {Promise<Object>} - Generated prompt with title, instructions, time limit, word limit, and criteria
+   */
+  async generateWritingPrompt(level, language) {
+    console.log(`Generating writing prompt for level: ${level}, language: ${language}`);
+    
+    try {
+      // Define the prompt for generating a writing assessment task
+      const prompt = `
+You are an expert language assessment designer specializing in CEFR (Common European Framework of Reference) standards.
+
+Please create a writing assessment prompt for a ${language} language learner at CEFR level ${level.toUpperCase()}.
+
+Your response should be structured as follows:
+1. A title for the writing task (brief and clear)
+2. A detailed prompt/instructions for the student (what they should write about)
+3. Appropriate time limit in minutes for this level (${this.getDefaultTimeLimit(level)} minutes is typical for ${level.toUpperCase()})
+4. Recommended word count target as a single number (${this.getDefaultWordLimit(level)} words is typical for ${level.toUpperCase()})
+5. 3-5 specific assessment criteria that are appropriate for this CEFR level
+
+IMPORTANT: For wordLimit, provide a single integer number, not a range.
+
+Make the topic interesting, relevant to adult learners, and appropriate for the specified CEFR level. 
+Ensure the complexity of vocabulary, grammar, and task matches the CEFR level requirements.
+DO NOT use generic topics like "write about your family" or "describe your hobby" - be specific and creative.
+
+For reference:
+- A1: Can write simple phrases and sentences about themselves and imaginary people.
+- A2: Can write a series of simple phrases and sentences linked with simple connectors.
+- B1: Can write straightforward connected texts on familiar subjects.
+- B2: Can write clear, detailed texts on various subjects related to their field of interest.
+- C1: Can write clear, well-structured texts on complex subjects.
+- C2: Can write complex texts with clarity and fluency in an appropriate and effective style.
+
+Return the response in JSON format with these fields: title, prompt, timeLimit (in minutes), wordLimit (as a single integer), and criteria (array).
+`;
+
+      console.log("Preparing to send request to OpenRouter API for prompt generation");
+      
+      // Make the request to OpenRouter API with increased timeout
+      const requestConfig = {
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        method: 'post',
+        data: {
+          model: this.model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.8,
+          max_tokens: 600,
+          response_format: { type: "json_object" }
+        },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.openRouterApiKey}`,
+          'HTTP-Referer': 'https://edusoft.com', 
+          'X-Title': 'EduSoft Writing Assessment Generator'
+        },
+        timeout: 20000 // Increase timeout to 20 seconds
+      };
+      
+      console.log("Sending request to OpenRouter API for prompt generation...");
+      const response = await axios(requestConfig);
+      
+      console.log("Response received from OpenRouter API:", {
+        status: response.status,
+        statusText: response.statusText,
+        dataKeys: Object.keys(response.data || {}),
+        hasChoices: response.data?.choices?.length > 0,
+        firstChoiceContent: response.data?.choices?.[0]?.message?.content?.substring(0, 100) + "..."
+      });
+
+      // Parse the response to extract the generated prompt
+      const aiResponse = response.data.choices[0].message.content;
+      console.log("AI response content (first 100 chars):", aiResponse.substring(0, 100) + "...");
+      
+      try {
+        // Try to parse the JSON response
+        let promptData;
+        
+        try {
+          // First attempt: direct JSON parsing
+          promptData = JSON.parse(aiResponse);
+        } catch (parseError) {
+          console.error("Error parsing AI response as JSON:", parseError);
+          console.log("Raw response:", aiResponse);
+          
+          // Second attempt: try to fix common JSON issues
+          let fixedJson = aiResponse;
+          
+          // Fix ranges like "250-300" to just use the upper bound
+          fixedJson = fixedJson.replace(/"wordLimit"\s*:\s*"?(\d+)-(\d+)"?/g, '"wordLimit": $2');
+          fixedJson = fixedJson.replace(/"wordLimit"\s*:\s*"(\d+)"/g, '"wordLimit": $1');
+          
+          // Fix quotes around numbers
+          fixedJson = fixedJson.replace(/"timeLimit"\s*:\s*"(\d+)"/g, '"timeLimit": $1');
+          
+          // Try parsing again with fixed JSON
+          try {
+            console.log("Attempting to parse fixed JSON:", fixedJson.substring(0, 100) + "...");
+            promptData = JSON.parse(fixedJson);
+          } catch (secondError) {
+            console.error("Still failed to parse JSON after fixes:", secondError);
+            // Extract JSON by finding opening and closing braces
+            const jsonMatch = aiResponse.match(/(\{[\s\S]*\})/);
+            if (jsonMatch && jsonMatch[1]) {
+              try {
+                console.log("Attempting to extract JSON from response");
+                promptData = JSON.parse(jsonMatch[1]);
+              } catch (thirdError) {
+                console.error("Failed to extract JSON:", thirdError);
+                throw new Error('Failed to parse AI response as JSON');
+              }
+            } else {
+              throw new Error('Failed to parse AI response as JSON');
+            }
+          }
+        }
+        
+        console.log("Successfully parsed JSON response:", {
+          title: promptData.title,
+          promptLength: promptData.prompt?.length || 0,
+          timeLimit: promptData.timeLimit,
+          wordLimit: promptData.wordLimit,
+          criteriaCount: promptData.criteria?.length || 0
+        });
+        
+        // Ensure all required fields are present and valid
+        const validatedPrompt = {
+          title: promptData.title || `${level.toUpperCase()} Writing Assessment`,
+          prompt: promptData.prompt || "Write about a topic of your choice.",
+          timeLimit: parseInt(promptData.timeLimit) || this.getDefaultTimeLimit(level),
+          wordLimit: parseInt(promptData.wordLimit) || this.getDefaultWordLimit(level),
+          criteria: Array.isArray(promptData.criteria) ? promptData.criteria : this.getDefaultCriteria(level, language)
+        };
+        
+        console.log("Prompt generated successfully:", {
+          title: validatedPrompt.title,
+          promptLength: validatedPrompt.prompt.length,
+          timeLimit: validatedPrompt.timeLimit,
+          wordLimit: validatedPrompt.wordLimit,
+          criteriaCount: validatedPrompt.criteria.length
+        });
+        
+        return validatedPrompt;
+      } catch (parseError) {
+        console.error("Error parsing AI response:", parseError, "Raw response:", aiResponse);
+        throw new Error('Failed to parse AI response as JSON');
+      }
+    } catch (error) {
+      console.error('Error generating writing prompt:', {
+        message: error.message,
+        stack: error.stack,
+        response: error.response ? {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data
+        } : 'No response data'
+      });
+      
+      // Don't fall back to default prompt, instead throw the error
+      // to let the controller handle it
+      throw error;
+    }
+  }
+
+  /**
+   * Get default time limit based on CEFR level
+   * @param {string} level - CEFR level
+   * @returns {number} - Time limit in minutes
+   */
+  getDefaultTimeLimit(level) {
+    const timeLimits = {
+      'a1': 10,
+      'a2': 15,
+      'b1': 20,
+      'b2': 30,
+      'c1': 40,
+      'c2': 50
+    };
+    return timeLimits[level.toLowerCase()] || 20;
+  }
+
+  /**
+   * Get default word limit based on CEFR level
+   * @param {string} level - CEFR level
+   * @returns {number} - Word limit
+   */
+  getDefaultWordLimit(level) {
+    const wordLimits = {
+      'a1': 50,
+      'a2': 80,
+      'b1': 150,
+      'b2': 200,
+      'c1': 300,
+      'c2': 400
+    };
+    return wordLimits[level.toLowerCase()] || 150;
+  }
+
+  /**
+   * Get default assessment criteria based on CEFR level and language
+   * @param {string} level - CEFR level
+   * @param {string} language - Language
+   * @returns {Array} - Default criteria
+   */
+  getDefaultCriteria(level, language) {
+    const isEnglish = language.toLowerCase() === 'english';
+    
+    const basicCriteria = [
+      isEnglish ? 'Basic Vocabulary' : 'Vocabulaire de Base',
+      isEnglish ? 'Simple Sentences' : 'Phrases Simples',
+      isEnglish ? 'Personal Information' : 'Informations Personnelles'
+    ];
+    
+    const intermediateCriteria = [
+      isEnglish ? 'Vocabulary Range' : 'Étendue du Vocabulaire',
+      isEnglish ? 'Grammar Accuracy' : 'Précision Grammaticale',
+      isEnglish ? 'Text Organization' : 'Organisation du Texte',
+      isEnglish ? 'Task Completion' : 'Réalisation de la Tâche'
+    ];
+    
+    const advancedCriteria = [
+      isEnglish ? 'Advanced Vocabulary' : 'Vocabulaire Avancé',
+      isEnglish ? 'Complex Structures' : 'Structures Complexes',
+      isEnglish ? 'Coherence and Cohesion' : 'Cohérence et Cohésion',
+      isEnglish ? 'Critical Thinking' : 'Pensée Critique',
+      isEnglish ? 'Academic Register' : 'Registre Académique'
+    ];
+    
+    const levelLower = level.toLowerCase();
+    if (levelLower === 'a1' || levelLower === 'a2') {
+      return basicCriteria;
+    } else if (levelLower === 'b1' || levelLower === 'b2') {
+      return intermediateCriteria;
+    } else {
+      return advancedCriteria;
+    }
+  }
+
+  /**
+   * Get a default writing prompt when AI generation fails
+   * @param {string} level - CEFR level
+   * @param {string} language - Language
+   * @returns {Object} - Default prompt
+   */
+  getDefaultPrompt(level, language) {
+    const isEnglish = language.toLowerCase() === 'english';
+    const levelLower = level.toLowerCase();
+    
+    let title, prompt, timeLimit, wordLimit, criteria;
+    
+    if (levelLower === 'a1') {
+      title = isEnglish ? 'Simple Introduction' : 'Présentation Simple';
+      prompt = isEnglish ? 
+        'Write a short paragraph about yourself (name, age, nationality, job/studies, hobbies).' : 
+        'Écrivez un court paragraphe sur vous-même (nom, âge, nationalité, travail/études, loisirs).';
+      timeLimit = 10;
+      wordLimit = 50;
+      criteria = this.getDefaultCriteria('a1', language);
+    } else if (levelLower === 'a2') {
+      title = isEnglish ? 'My Daily Routine' : 'Ma Routine Quotidienne';
+      prompt = isEnglish ? 
+        'Describe your typical day. What do you do in the morning, afternoon, and evening?' : 
+        'Décrivez votre journée typique. Que faites-vous le matin, l\'après-midi et le soir?';
+      timeLimit = 15;
+      wordLimit = 80;
+      criteria = this.getDefaultCriteria('a2', language);
+    } else if (levelLower === 'b1') {
+      title = isEnglish ? 'Personal Experience' : 'Expérience Personnelle';
+      prompt = isEnglish ? 
+        'Write about a memorable trip or vacation you have taken. Describe where you went, who you were with, what you did, and why it was memorable.' : 
+        'Écrivez à propos d\'un voyage ou de vacances mémorables que vous avez fait. Décrivez où vous êtes allé, avec qui vous étiez, ce que vous avez fait et pourquoi c\'était mémorable.';
+      timeLimit = 20;
+      wordLimit = 150;
+      criteria = this.getDefaultCriteria('b1', language);
+    } else if (levelLower === 'b2') {
+      title = isEnglish ? 'Advantages and Disadvantages' : 'Avantages et Inconvénients';
+      prompt = isEnglish ? 
+        'Discuss the advantages and disadvantages of working from home. Give specific examples and your own opinion.' : 
+        'Discutez des avantages et des inconvénients du télétravail. Donnez des exemples spécifiques et votre propre opinion.';
+      timeLimit = 30;
+      wordLimit = 200;
+      criteria = this.getDefaultCriteria('b2', language);
+    } else if (levelLower === 'c1') {
+      title = isEnglish ? 'Argumentative Essay' : 'Essai Argumentatif';
+      prompt = isEnglish ? 
+        'Write an essay discussing whether social media has had a positive or negative impact on society. Present arguments for both sides and state your own opinion with supporting reasons.' : 
+        'Rédigez un essai discutant si les médias sociaux ont eu un impact positif ou négatif sur la société. Présentez des arguments pour les deux côtés et donnez votre propre opinion avec des raisons à l\'appui.';
+      timeLimit = 40;
+      wordLimit = 300;
+      criteria = this.getDefaultCriteria('c1', language);
+    } else {
+      title = isEnglish ? 'Critical Analysis' : 'Analyse Critique';
+      prompt = isEnglish ? 
+        'Analyze the relationship between technology and human communication. Discuss how digital tools have transformed interpersonal relationships, considering both benefits and challenges. Support your analysis with examples and scholarly perspectives.' : 
+        'Analysez la relation entre la technologie et la communication humaine. Discutez comment les outils numériques ont transformé les relations interpersonnelles, en considérant à la fois les avantages et les défis. Soutenez votre analyse avec des exemples et des perspectives académiques.';
+      timeLimit = 50;
+      wordLimit = 400;
+      criteria = this.getDefaultCriteria('c2', language);
+    }
+    
+    return {
+      title,
+      prompt,
+      timeLimit,
+      wordLimit,
+      criteria
+    };
   }
 }
 

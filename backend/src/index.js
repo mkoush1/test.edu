@@ -8,6 +8,13 @@ import userRoutes from './routes/user.js';
 import assessmentRoutes from './routes/assessmentRoutes.js';
 import puzzleRoutes from './routes/puzzleRoutes.js';
 import presentationAssessmentRoutes from './routes/presentationAssessment.routes.js';
+import speakingQuestionRoutes from './routes/speakingQuestionRoutes.js';
+import writingAssessmentRoutes from './routes/writingAssessmentRoutes.js';
+import speakingAssessmentRoutes from './routes/speakingAssessmentRoutes.js';
+import listeningAssessmentRoutes from './routes/listeningAssessmentRoutes.js';
+import cloudinaryRoutes from './routes/cloudinaryRoutes.js';
+import readingAssessmentRoutes from './routes/readingAssessmentRoutes.js';
+import communicationRoutes from './routes/communicationRoutes.js';
 
 // Load environment variables
 dotenv.config();
@@ -18,7 +25,7 @@ console.log('MongoDB URI:', process.env.MONGODB_URI ? 'Found' : 'Not Found');
 const app = express();
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));  // Increased limit for larger video submissions
 
 // File upload middleware
 app.use(fileUpload({
@@ -52,13 +59,22 @@ app.use('/api/users', userRoutes);
 app.use('/api/assessments', assessmentRoutes);
 app.use('/api/puzzle', puzzleRoutes);
 app.use('/api/assessments/presentation', presentationAssessmentRoutes);
+app.use('/api/speaking-questions', speakingQuestionRoutes);
+app.use('/api/writing-assessment', writingAssessmentRoutes);
+app.use('/api/speaking-assessment', speakingAssessmentRoutes);
+app.use('/api/listening-assessment', listeningAssessmentRoutes);
+app.use('/api/reading-assessment', readingAssessmentRoutes);
+app.use('/api/cloudinary', cloudinaryRoutes);
+app.use('/api/communication', communicationRoutes);
 
 // Connect to MongoDB
 const connectDB = async () => {
   try {
     if (!process.env.MONGODB_URI) {
       console.warn('MongoDB URI is not defined in environment variables');
-      process.exit(1);
+      // For development, provide a default MongoDB URI
+      process.env.MONGODB_URI = 'mongodb://127.0.0.1:27017/edusoft';
+      console.log('Using default MongoDB URI for development');
     }
 
     console.log('Attempting to connect to MongoDB...');
@@ -85,7 +101,12 @@ const connectDB = async () => {
       codeName: error.codeName,
       stack: error.stack
     });
-    process.exit(1);
+    // Don't exit on connection error in development
+    if (process.env.NODE_ENV === 'production') {
+      process.exit(1);
+    } else {
+      console.log('Continuing without database connection in development mode');
+    }
   }
 };
 
@@ -99,7 +120,12 @@ app.use((err, req, res, next) => {
 connectDB();
 
 // Start server
-const PORT = process.env.PORT || 5000;
+const PORT = 5003; // Force port 5003
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on port ${PORT}`);
+  console.log(`Test the API at: http://localhost:${PORT}/api/test`);
+  console.log(`Writing assessment endpoint: http://localhost:${PORT}/api/writing-assessment/evaluate`);
+  console.log(`Speaking assessment endpoint: http://localhost:${PORT}/api/speaking-assessment/evaluate`);
+  console.log(`Speaking assessment review endpoint: http://localhost:${PORT}/api/speaking-assessment/pending`);
+  console.log(`Reading assessment endpoint: http://localhost:${PORT}/api/reading-assessment/submit`);
 }); 
