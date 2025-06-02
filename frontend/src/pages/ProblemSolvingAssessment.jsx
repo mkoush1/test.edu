@@ -24,11 +24,11 @@ const ProblemSolvingAssessment = () => {
       image: "/eduSoft_logo.png"
     },
     {
-      _id: "leetcode-link",
+      _id: "codeforces-link",
       title: "Link LeetCode Account",
-      description: "Connect your LeetCode account and solve coding problems to demonstrate your programming skills",
+      description: "Connect your Codeforces account to track your competitive programming progress",
       category: "Problem Solving",
-      duration: 30,
+      duration: 5,
       image: "/eduSoft_logo.png"
     }
   ];

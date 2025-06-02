@@ -13,6 +13,17 @@ const AssessmentCard = ({ assessment, onViewResults }) => {
     const normalizedCategory = assessment.category
       ? assessment.category.trim().toLowerCase().replace(/[-_]/g, " ")
       : "";
+    
+    // Special handling for Communication Skills Assessment
+    if (
+      normalizedCategory === "communication" || 
+      assessment.title === 'Communication Skills Assessment' || 
+      assessment.title?.toLowerCase().includes('communication')
+    ) {
+      navigate("/communication-assessment");
+      return;
+    }
+    
     // Main dashboard Problem Solving card (go to 3-card selection page)
     if (
       normalizedCategory === "problem solving" &&

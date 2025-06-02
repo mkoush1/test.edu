@@ -10,6 +10,7 @@ const PuzzleGame = ({ initialPuzzle, assessmentId }) => {
   const [timer, setTimer] = useState(240); // 4 minutes in seconds
   const [timerInterval, setTimerInterval] = useState(null);
   const [validMoves, setValidMoves] = useState([]);
+  const TIME_LIMIT = 4 * 60; // 4 minutes in seconds
   const [isPaused, setIsPaused] = useState(false);
   const [savedState, setSavedState] = useState(null);
   const [isTimeUp, setIsTimeUp] = useState(false);
@@ -22,6 +23,14 @@ const PuzzleGame = ({ initialPuzzle, assessmentId }) => {
       if (timerInterval) clearInterval(timerInterval);
     };
   }, []);
+
+  // Check time limit
+  useEffect(() => {
+    if (timer >= TIME_LIMIT && !puzzle?.isCompleted) {
+      clearInterval(timerInterval);
+      submitAssessment(puzzle);
+    }
+  }, [timer, puzzle]);
 
   // Check if time is up
   useEffect(() => {
@@ -234,13 +243,17 @@ const PuzzleGame = ({ initialPuzzle, assessmentId }) => {
           localStorage.setItem('userData', JSON.stringify(userData));
         }
 
-        // Show success message
-        setError(null);
+        // Update puzzle state with score and rating
         setPuzzle(prev => ({
           ...prev,
           isCompleted: true,
-          showWinMessage: true
+          score: response.data.result.score,
+          rating: response.data.result.rating,
+          completionTime: response.data.result.completionTime
         }));
+
+        // Show success message
+        setError(null);
       } else {
         setError('Failed to submit assessment');
       }
@@ -405,6 +418,12 @@ const PuzzleGame = ({ initialPuzzle, assessmentId }) => {
               'text-orange-600'
             }`}>
               {scoreMessage}
+            </p>
+            <p className="text-gray-600 mb-4">
+              Rating: {puzzle.rating || 'Calculating...'}
+            </p>
+            <p className="text-gray-600 mb-4">
+              Completion Time: {puzzle.completionTime || (timer / 60).toFixed(2)} minutes
             </p>
             <div className="flex justify-center space-x-4">
               <button

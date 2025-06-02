@@ -12,30 +12,13 @@ const ConfirmEmail = () => {
   useEffect(() => {
     const confirmEmail = async () => {
       try {
+        // Try supervisor confirmation endpoint first
         let res;
-        let userEndpointFailed = false;
         try {
-          console.log('Trying user confirmation endpoint...');
+          res = await axios.get(`/api/auth/supervisor/confirm-email/${token}`);
+        } catch (supervisorErr) {
+          // If supervisor endpoint fails, try user endpoint
           res = await axios.get(`/api/auth/user/confirm-email/${token}`);
-          console.log('User confirmation endpoint response:', res.data);
-          // If the response does not contain a user, treat as failure
-          if (!res.data?.user) {
-            userEndpointFailed = true;
-            throw new Error('User endpoint returned no user');
-          }
-        } catch (userErr) {
-          userEndpointFailed = true;
-          console.log('User confirmation endpoint failed:', userErr?.response?.data || userErr.message);
-        }
-        if (userEndpointFailed) {
-          try {
-            console.log('Trying supervisor confirmation endpoint...');
-            res = await axios.get(`/api/auth/supervisor/confirm-email/${token}`);
-            console.log('Supervisor confirmation endpoint response:', res.data);
-          } catch (supErr) {
-            console.log('Supervisor confirmation endpoint failed:', supErr?.response?.data || supErr.message);
-            throw supErr;
-          }
         }
         setMessage(res.data.message);
         setSuccess(true);

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:5000/api';
+const API_URL = 'http://localhost:5003/api';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -245,4 +245,4 @@ export const signup = authService.userSignup;
 
 export { userService, supervisorService };
 
-export { api }; 
+export default api; 

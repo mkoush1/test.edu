@@ -11,7 +11,10 @@ const DashboardLayout = ({ children, title }) => {
   const handleLogout = () => {
     setLoading(true);
     setTimeout(() => {
+      localStorage.removeItem("token");
       localStorage.removeItem("userData");
+      localStorage.removeItem("userType");
+      localStorage.removeItem("userId");
       navigate("/login");
     }, 500);
   };
@@ -60,7 +63,7 @@ const DashboardLayout = ({ children, title }) => {
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-gray-600 text-sm sm:text-base">
-                Welcome, {userData.name}
+                Welcome, {userData.name || userData.email || "User"}
               </span>
               <button
                 onClick={handleLogout}
